@@ -1,0 +1,24 @@
+{
+  "name": "@proxyflow/react-native-sdk",
+  "version": "1.0.0",
+  "description": "proxyflow React Native SDK — fetch 请求拦截与 Mock",
+  "main": "proxyflow-rn-sdk.js",
+  "types": "proxyflow-rn-sdk.d.ts",
+  "files": [
+    "proxyflow-rn-sdk.js",
+    "proxyflow-rn-sdk.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "proxyflow",
+    "react-native",
+    "mock",
+    "proxy",
+    "fetch"
+  ],
+  "author": "shibazijiang <shibazijiang@gmail.com>",
+  "license": "ISC",
+  "peerDependencies": {
+    "react-native": ">=0.60.0"
+  }
+}

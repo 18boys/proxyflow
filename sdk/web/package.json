@@ -1,0 +1,22 @@
+{
+  "name": "@proxyflow/web-sdk",
+  "version": "1.0.0",
+  "description": "proxyflow Web SDK — 浏览器 fetch 请求拦截与 Mock",
+  "main": "proxyflow-web-sdk.js",
+  "types": "proxyflow-web-sdk.d.ts",
+  "files": [
+    "proxyflow-web-sdk.js",
+    "proxyflow-web-sdk.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "proxyflow",
+    "web",
+    "browser",
+    "mock",
+    "proxy",
+    "fetch"
+  ],
+  "author": "shibazijiang <shibazijiang@gmail.com>",
+  "license": "ISC"
+}

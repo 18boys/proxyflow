@@ -1,0 +1,21 @@
+{
+  "name": "@proxyflow/miniprogram-sdk",
+  "version": "1.0.0",
+  "description": "proxyflow Mini-Program SDK — 小程序网络请求拦截与 Mock",
+  "main": "proxy-mp-sdk.js",
+  "types": "proxy-mp-sdk.d.ts",
+  "files": [
+    "proxy-mp-sdk.js",
+    "proxy-mp-sdk.d.ts",
+    "README.md"
+  ],
+  "keywords": [
+    "proxyflow",
+    "miniprogram",
+    "wechat",
+    "mock",
+    "proxy"
+  ],
+  "author": "shibazijiang <shibazijiang@gmail.com>",
+  "license": "ISC"
+}

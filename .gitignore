@@ -1,0 +1,21 @@
+**/node_modules
+.idea/*
+
+# 部署结果文件
+deploy-result-*.json
+deploy-failure-*.json
+deploy-result-latest.json
+preview-qrcode.jpg
+private.key
+
+# 打包中间结果
+/font-crop/output
+
+AGENTS.md
+docs
+**/dist
+
+# 数据库文件
+backend/*.db
+backend/*.db-shm
+backend/*.db-wal
