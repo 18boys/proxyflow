@@ -72,7 +72,14 @@ export default function DevicesPage() {
   const handleSaveExclusions = async () => {
     setSavingExclusions(true);
     try {
-      const result = await settingsApi.updateExclusions(exclusions);
+      let finalExclusions = [...exclusions];
+      const domain = newDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+      if (domain && !finalExclusions.includes(domain)) {
+        finalExclusions.push(domain);
+        setNewDomain('');
+      }
+
+      const result = await settingsApi.updateExclusions(finalExclusions);
       setExclusions(result.exclusion_domains);
     } finally {
       setSavingExclusions(false);

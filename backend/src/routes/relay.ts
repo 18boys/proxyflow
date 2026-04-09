@@ -119,6 +119,54 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     if (typeof v === 'string') normalizedHeaders[k.toLowerCase()] = v;
   }
 
+  // Check exclusion domains: if the target host is in the user's exclusion list, forward silently
+  if (userId) {
+    const db = getDb();
+    const settings = db.prepare(
+      'SELECT exclusion_domains FROM user_settings WHERE user_id = ?'
+    ).get(userId) as { exclusion_domains: string } | undefined;
+    if (settings) {
+      const exclusions: string[] = JSON.parse(settings.exclusion_domains);
+      const targetHost = targetUrl.hostname.toLowerCase();
+      const isExcluded = exclusions.some(
+        (domain) => targetHost === domain || targetHost.endsWith(`.${domain}`)
+      );
+      if (isExcluded) {
+        // Forward the request silently without logging
+        const isHttps = targetUrl.protocol === 'https:';
+        const lib = isHttps ? https : http;
+        const forwardHeaders: Record<string, string> = { ...normalizedHeaders, host: targetUrl.host };
+        delete forwardHeaders['connection'];
+        delete forwardHeaders['transfer-encoding'];
+
+        const options: http.RequestOptions = {
+          hostname: targetUrl.hostname,
+          port: targetUrl.port || (isHttps ? 443 : 80),
+          path: targetUrl.pathname + targetUrl.search,
+          method: method.toUpperCase(),
+          headers: forwardHeaders,
+          timeout: 30000,
+        };
+
+        const proxyReq = lib.request(options, (proxyRes) => {
+          applyCorsHeaders(req, res, proxyRes.headers as Record<string, string>);
+          res.status(proxyRes.statusCode ?? 200);
+          proxyRes.pipe(res);
+        });
+
+        proxyReq.on('error', (err: Error) => {
+          res.status(502).json({ error: `Upstream error: ${err.message}` });
+        });
+
+        if (reqBody) {
+          proxyReq.write(reqBody);
+        }
+        proxyReq.end();
+        return;
+      }
+    }
+  }
+
   // Check for mock match
   const mockMatch = userId
     ? findMatchingMock(userId, method.toUpperCase(), url, normalizedHeaders, reqBody ?? null)

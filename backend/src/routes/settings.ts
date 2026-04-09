@@ -32,14 +32,18 @@ router.put('/exclusions', requireAuth, (req: AuthRequest, res: Response): void =
 
   const db = getDb();
 
-  // Upsert user settings
-  db.prepare(`
-    INSERT INTO user_settings (user_id, exclusion_domains, updated_at)
-    VALUES (?, ?, datetime('now', '+8 hours'))
-    ON CONFLICT(user_id) DO UPDATE SET
-      exclusion_domains = excluded.exclusion_domains,
-      updated_at = excluded.updated_at
-  `).run(req.userId!, JSON.stringify(cleaned));
+  // Try update first
+  const info = db.prepare(`
+    UPDATE user_settings SET exclusion_domains = ?, updated_at = datetime('now', '+8 hours')
+    WHERE user_id = ?
+  `).run(JSON.stringify(cleaned), req.userId!);
+
+  if (info.changes === 0) {
+    db.prepare(`
+      INSERT INTO user_settings (user_id, exclusion_domains)
+      VALUES (?, ?)
+    `).run(req.userId!, JSON.stringify(cleaned));
+  }
 
   res.json({ exclusion_domains: cleaned });
 });

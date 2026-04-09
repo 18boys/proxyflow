@@ -89,7 +89,7 @@ export default function Layout() {
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shrink-0">
               <Zap size={16} className="text-white" />
             </div>
-            <span className="hidden lg:block font-bold text-white text-sm truncate">proxyflow</span>
+            <span className="hidden lg:block font-bold text-slate-100 text-sm truncate">proxyflow</span>
           </div>
         </div>
 

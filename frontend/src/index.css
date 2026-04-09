@@ -78,13 +78,48 @@
 
 /* Light theme overrides */
 .light {
-  .input-field {
-    @apply bg-white border-slate-300 text-slate-900 placeholder:text-slate-400;
-  }
+  color-scheme: light;
+}
 
-  .card {
-    @apply bg-white border-slate-200;
-  }
+.light .input-field {
+  @apply bg-white border-slate-300 text-slate-900;
+}
+.light .input-field::placeholder {
+  color: theme('colors.slate.400');
+}
+
+.light .card {
+  @apply bg-white border-slate-200 shadow-sm;
+}
+
+@layer utilities {
+  /* Override global hardcoded dark background classes under .light */
+  .light .bg-slate-950 { background-color: theme('colors.slate.50') !important; }
+  .light .bg-slate-900 { background-color: theme('colors.white') !important; }
+  .light .bg-slate-800 { background-color: theme('colors.slate.50') !important; }
+  .light .bg-slate-700 { background-color: theme('colors.slate.200') !important; }
+  
+  .light .bg-slate-900\/50 { background-color: rgb(255 255 255 / 0.7) !important; }
+  .light .bg-slate-900\/30 { background-color: rgb(255 255 255 / 0.5) !important; }
+  .light .bg-slate-800\/50 { background-color: rgb(248 250 252 / 0.7) !important; }
+  
+  /* Override borders */
+  .light .border-slate-800 { border-color: theme('colors.slate.200') !important; }
+  .light .border-slate-700 { border-color: theme('colors.slate.300') !important; }
+  .light .border-slate-600 { border-color: theme('colors.slate.400') !important; }
+  
+  /* Override texts */
+  .light .text-slate-100 { color: theme('colors.slate.900') !important; }
+  .light .text-slate-200 { color: theme('colors.slate.800') !important; }
+  .light .text-slate-300 { color: theme('colors.slate.700') !important; }
+  .light .text-slate-400 { color: theme('colors.slate.600') !important; }
+  
+  /* Override hover effects */
+  .light .hover\:bg-slate-800:hover { background-color: theme('colors.slate.100') !important; }
+  .light .hover\:bg-slate-700:hover { background-color: theme('colors.slate.200') !important; }
+  .light .hover\:text-slate-200:hover { color: theme('colors.slate.800') !important; }
+  .light .hover\:text-slate-100:hover { color: theme('colors.slate.900') !important; }
+  .light .hover\:text-white:hover { color: theme('colors.slate.900') !important; }
 }
 
 /* JSON viewer overrides */
