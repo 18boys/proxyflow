@@ -66,7 +66,7 @@ miniprogram/
 
 ```javascript
 // app.js
-const proxyflow = require('./utils/proxyflow-sdk');
+const proxyflow = require('@proxyflow/miniprogram-sdk');
 
 App({
   onLaunch() {
@@ -74,8 +74,10 @@ App({
       serverUrl: 'http://192.168.1.100:9000',  // proxyflow 服务器地址
       sessionId: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx',  // 设备配对 sessionId
       debug: true,      // 开发阶段建议开启
-      autoPatch: true,  // 自动拦截 wx.request
+      autoPatch: false,  // 自动拦截 wx.request. 设置为true,在热重载的时候可能会有问题，需要手动调用 unpatch 和 patch
     });
+    MockFlow.unpatch() // 清除热重载残留状态
+    MockFlow.patch()   // 强制重新 patch wx.request
   },
 });
 ```

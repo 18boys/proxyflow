@@ -1,0 +1,35 @@
+module.exports = {
+  apps: [
+    {
+      name: 'proxyflow-backend',
+      cwd: __dirname + '/backend',
+      script: 'dist/index.js',
+      interpreter: 'node',
+      instances: 1,
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '500M',
+      env_file: __dirname + '/backend/.env',
+      env: {
+        NODE_ENV: 'production',
+      },
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      error_file: __dirname + '/logs/backend-error.log',
+      out_file: __dirname + '/logs/backend-out.log',
+      merge_logs: true,
+    },
+    {
+      name: 'proxyflow-frontend',
+      script: 'npx',
+      args: 'serve -s frontend/dist -l 3100',
+      cwd: __dirname,
+      interpreter: 'none',
+      autorestart: true,
+      watch: false,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      error_file: __dirname + '/logs/frontend-error.log',
+      out_file: __dirname + '/logs/frontend-out.log',
+      merge_logs: true,
+    },
+  ],
+};

@@ -6,7 +6,17 @@
     "dev:backend": "cd backend && npm run dev",
     "dev:frontend": "cd frontend && npm run dev",
     "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "install:all": "cd backend && npm install && cd ../frontend && npm install"
+    "install:all": "cd backend && npm install && cd ../frontend && npm install",
+    "build:backend": "cd backend && npm run build",
+    "build:frontend": "cd frontend && npm run build",
+    "build": "npm run build:backend && npm run build:frontend",
+    "start": "cd backend && node dist/index.js",
+    "deploy": "npm run build && pm2 restart ecosystem.config.js --update-env",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop proxyflow-backend",
+    "pm2:restart": "pm2 restart proxyflow-backend",
+    "pm2:logs": "pm2 logs proxyflow-backend",
+    "pm2:status": "pm2 list"
   },
   "keywords": [
     "mock",

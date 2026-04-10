@@ -45,7 +45,7 @@ npm link proxyflow-react-native
 在 `app/_layout.tsx`（Expo Router）或 `index.js` 的**最顶层**初始化，确保先于任何 `fetch` 调用：
 
 ```typescript
-import proxyflow from 'proxyflow-react-native';
+import proxyflow from '@proxyflow/react-native-sdk';
 
 if (__DEV__) {
   proxyflow.init({
