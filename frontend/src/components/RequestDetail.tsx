@@ -5,6 +5,7 @@ import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
 import { requestsApi, mocksApi } from '../api/client';
 import { VersionEditModal } from './MockEditor';
+import { copyToClipboard } from '../utils/clipboard';
 
 interface RequestDetailProps {
   requestId: number | null;
@@ -39,9 +40,11 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
     if (!requestId) return;
     try {
       const { curl } = await requestsApi.getCurl(requestId);
-      await navigator.clipboard.writeText(curl);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      const success = await copyToClipboard(curl);
+      if (success) {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
     } catch {
       // ignore
     }

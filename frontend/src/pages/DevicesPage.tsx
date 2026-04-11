@@ -4,6 +4,7 @@ import QRCode from 'react-qr-code';
 import type { DeviceSession } from '../types';
 import { devicesApi, settingsApi } from '../api/client';
 import { useStore } from '../store/useStore';
+import { copyToClipboard } from '../utils/clipboard';
 
 export default function DevicesPage() {
   const { devices, setDevices } = useStore();
@@ -214,10 +215,12 @@ export default function DevicesPage() {
 
 function CopyField({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(value);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopy = async () => {
+    const success = await copyToClipboard(value);
+    if (success) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
   };
   return (
     <div className="bg-slate-800 rounded-lg p-3 font-mono">
