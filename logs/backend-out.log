@@ -20,3 +20,35 @@ Shutting down...
 2026-04-10 16:52:52 +08:00:    WebSocket device:    ws://localhost:9000/ws/device?token=<pairing_token>
 2026-04-10 16:52:52 +08:00: ✅ proxyflow Proxy server running at http://localhost:9001
 2026-04-10 16:52:52 +08:00:    Usage: curl -x http://localhost:9001 https://httpbin.org/get
+2026-04-11 11:40:29 +08:00: 
+Shutting down...
+2026-04-11 11:40:29 +08:00: [db] Schema sync complete.
+2026-04-11 11:40:29 +08:00: ✅ proxyflow API server running at http://localhost:9000
+2026-04-11 11:40:29 +08:00:    WebSocket dashboard: ws://localhost:9000/ws/dashboard?token=<jwt>
+2026-04-11 11:40:29 +08:00:    WebSocket device:    ws://localhost:9000/ws/device?token=<pairing_token>
+2026-04-11 11:40:29 +08:00: ✅ proxyflow Proxy server running at http://localhost:9001
+2026-04-11 11:40:29 +08:00:    Usage: curl -x http://localhost:9001 https://httpbin.org/get
+2026-04-11 11:44:47 +08:00: 
+Shutting down...
+2026-04-11 11:44:48 +08:00: [db] Schema sync complete.
+2026-04-11 11:44:48 +08:00: ✅ proxyflow API server running at http://localhost:9000
+2026-04-11 11:44:48 +08:00:    WebSocket dashboard: ws://localhost:9000/ws/dashboard?token=<jwt>
+2026-04-11 11:44:48 +08:00:    WebSocket device:    ws://localhost:9000/ws/device?token=<pairing_token>
+2026-04-11 11:44:48 +08:00: ✅ proxyflow Proxy server running at http://localhost:9001
+2026-04-11 11:44:48 +08:00:    Usage: curl -x http://localhost:9001 https://httpbin.org/get
+2026-04-11 11:46:34 +08:00: 
+Shutting down...
+2026-04-11 11:46:35 +08:00: [db] Schema sync complete.
+2026-04-11 11:46:35 +08:00: ✅ proxyflow API server running at http://localhost:9000
+2026-04-11 11:46:35 +08:00:    WebSocket dashboard: ws://localhost:9000/ws/dashboard?token=<jwt>
+2026-04-11 11:46:35 +08:00:    WebSocket device:    ws://localhost:9000/ws/device?token=<pairing_token>
+2026-04-11 11:46:35 +08:00: ✅ proxyflow Proxy server running at http://localhost:9001
+2026-04-11 11:46:35 +08:00:    Usage: curl -x http://localhost:9001 https://httpbin.org/get
+2026-04-11 11:49:20 +08:00: 
+Shutting down...
+2026-04-11 11:49:21 +08:00: [db] Schema sync complete.
+2026-04-11 11:49:21 +08:00: ✅ proxyflow API server running at http://localhost:9000
+2026-04-11 11:49:21 +08:00:    WebSocket dashboard: ws://localhost:9000/ws/dashboard?token=<jwt>
+2026-04-11 11:49:21 +08:00:    WebSocket device:    ws://localhost:9000/ws/device?token=<pairing_token>
+2026-04-11 11:49:21 +08:00: ✅ proxyflow Proxy server running at http://localhost:9001
+2026-04-11 11:49:21 +08:00:    Usage: curl -x http://localhost:9001 https://httpbin.org/get

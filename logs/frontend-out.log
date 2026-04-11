@@ -126,3 +126,91 @@
 2026-04-10 16:53:02 +08:00:  HTTP  4/10/2026 4:53:02 PM ::1 Returned 304 in 1 ms
 2026-04-10 16:53:02 +08:00:  HTTP  4/10/2026 4:53:02 PM ::1 GET /favicon.svg
 2026-04-10 16:53:02 +08:00:  HTTP  4/10/2026 4:53:02 PM ::1 Returned 304 in 1 ms
+2026-04-11 11:33:48 +08:00:  HTTP  4/11/2026 11:33:48 AM ::1 GET /
+2026-04-11 11:33:48 +08:00:  HTTP  4/11/2026 11:33:48 AM ::1 Returned 200 in 70 ms
+2026-04-11 11:33:48 +08:00:  HTTP  4/11/2026 11:33:48 AM ::1 GET /assets/index-CSvZPWDE.js
+2026-04-11 11:33:48 +08:00:  HTTP  4/11/2026 11:33:48 AM ::1 Returned 304 in 12 ms
+2026-04-11 11:33:48 +08:00:  HTTP  4/11/2026 11:33:48 AM ::1 GET /assets/index-BTTc16dq.css
+2026-04-11 11:33:48 +08:00:  HTTP  4/11/2026 11:33:48 AM ::1 Returned 304 in 3 ms
+2026-04-11 11:33:49 +08:00:  HTTP  4/11/2026 11:33:49 AM ::1 GET /api/requests?limit=100
+2026-04-11 11:33:49 +08:00:  HTTP  4/11/2026 11:33:49 AM ::1 Returned 304 in 1 ms
+2026-04-11 11:33:49 +08:00:  HTTP  4/11/2026 11:33:49 AM ::1 GET /favicon.svg
+2026-04-11 11:33:49 +08:00:  HTTP  4/11/2026 11:33:49 AM ::1 Returned 304 in 4 ms
+2026-04-11 11:34:12 +08:00:  HTTP  4/11/2026 11:34:12 AM ::1 GET /api/requests/492
+2026-04-11 11:34:12 +08:00:  HTTP  4/11/2026 11:34:12 AM ::1 Returned 200 in 2 ms
+2026-04-11 11:34:14 +08:00:  HTTP  4/11/2026 11:34:14 AM ::1 GET /api/requests/490
+2026-04-11 11:34:14 +08:00:  HTTP  4/11/2026 11:34:14 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:34:15 +08:00:  HTTP  4/11/2026 11:34:15 AM ::1 GET /api/requests/491
+2026-04-11 11:34:15 +08:00:  HTTP  4/11/2026 11:34:15 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:34:18 +08:00:  HTTP  4/11/2026 11:34:18 AM ::1 GET /api/requests/489
+2026-04-11 11:34:18 +08:00:  HTTP  4/11/2026 11:34:18 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:34:28 +08:00:  HTTP  4/11/2026 11:34:28 AM ::1 GET /api/devices
+2026-04-11 11:34:28 +08:00:  HTTP  4/11/2026 11:34:28 AM ::1 Returned 304 in 1 ms
+2026-04-11 11:34:28 +08:00:  HTTP  4/11/2026 11:34:28 AM ::1 GET /favicon.svg
+2026-04-11 11:34:28 +08:00:  HTTP  4/11/2026 11:34:28 AM ::1 GET /api/settings
+2026-04-11 11:34:28 +08:00:  HTTP  4/11/2026 11:34:28 AM ::1 Returned 304 in 1 ms
+2026-04-11 11:34:28 +08:00:  HTTP  4/11/2026 11:34:28 AM ::1 Returned 304 in 1 ms
+2026-04-11 11:34:44 +08:00:  HTTP  4/11/2026 11:34:44 AM ::1 POST /api/devices/pair
+2026-04-11 11:34:44 +08:00:  HTTP  4/11/2026 11:34:44 AM ::1 Returned 200 in 5 ms
+2026-04-11 11:34:47 +08:00:  HTTP  4/11/2026 11:34:47 AM ::1 POST /api/devices/pair
+2026-04-11 11:34:47 +08:00:  HTTP  4/11/2026 11:34:47 AM ::1 Returned 200 in 2 ms
+2026-04-11 11:34:48 +08:00:  HTTP  4/11/2026 11:34:48 AM ::1 POST /api/devices/pair
+2026-04-11 11:34:48 +08:00:  HTTP  4/11/2026 11:34:48 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:34:49 +08:00:  HTTP  4/11/2026 11:34:49 AM ::1 GET /.well-known/appspecific/com.chrome.devtools.json
+2026-04-11 11:34:49 +08:00:  HTTP  4/11/2026 11:34:49 AM ::1 Returned 200 in 10 ms
+2026-04-11 11:34:49 +08:00:  HTTP  4/11/2026 11:34:49 AM ::1 GET /assets/index-BTTc16dq.css
+2026-04-11 11:34:49 +08:00:  HTTP  4/11/2026 11:34:49 AM ::1 Returned 304 in 2 ms
+2026-04-11 11:34:56 +08:00:  HTTP  4/11/2026 11:34:56 AM ::1 POST /api/devices/pair
+2026-04-11 11:34:56 +08:00:  HTTP  4/11/2026 11:34:56 AM ::1 Returned 200 in 2 ms
+2026-04-11 11:34:58 +08:00:  HTTP  4/11/2026 11:34:58 AM ::1 POST /api/devices/pair
+2026-04-11 11:34:58 +08:00:  HTTP  4/11/2026 11:34:58 AM ::1 Returned 200 in 2 ms
+2026-04-11 11:35:29 +08:00:  HTTP  4/11/2026 11:35:29 AM ::1 POST /api/devices/pair
+2026-04-11 11:35:29 +08:00:  HTTP  4/11/2026 11:35:29 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:36:42 +08:00:  HTTP  4/11/2026 11:36:42 AM ::1 POST /api/devices/pair
+2026-04-11 11:36:42 +08:00:  HTTP  4/11/2026 11:36:42 AM ::1 Returned 200 in 3 ms
+2026-04-11 11:40:29 +08:00: 
+2026-04-11 11:40:29 +08:00:  INFO  Gracefully shutting down. Please wait...
+2026-04-11 11:40:32 +08:00:  INFO  Accepting connections at http://localhost:3100
+2026-04-11 11:40:34 +08:00:  HTTP  4/11/2026 11:40:34 AM ::1 POST /api/devices/pair
+2026-04-11 11:40:34 +08:00:  HTTP  4/11/2026 11:40:34 AM ::1 Returned 200 in 12 ms
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 GET /devices
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 Returned 200 in 2 ms
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 GET /.well-known/appspecific/com.chrome.devtools.json
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 GET /assets/index-CSvZPWDE.js
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 GET /assets/index-BTTc16dq.css
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 Returned 200 in 5 ms
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 Returned 200 in 7 ms
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 GET /api/devices
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 GET /api/settings
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 Returned 200 in 5 ms
+2026-04-11 11:40:37 +08:00:  HTTP  4/11/2026 11:40:37 AM ::1 Returned 200 in 3 ms
+2026-04-11 11:40:38 +08:00:  HTTP  4/11/2026 11:40:38 AM ::1 GET /favicon.svg
+2026-04-11 11:40:38 +08:00:  HTTP  4/11/2026 11:40:38 AM ::1 Returned 200 in 5 ms
+2026-04-11 11:40:49 +08:00:  HTTP  4/11/2026 11:40:49 AM ::1 POST /api/devices/pair
+2026-04-11 11:40:49 +08:00:  HTTP  4/11/2026 11:40:49 AM ::1 Returned 200 in 3 ms
+2026-04-11 11:44:47 +08:00: 
+2026-04-11 11:44:47 +08:00:  INFO  Gracefully shutting down. Please wait...
+2026-04-11 11:44:50 +08:00:  INFO  Accepting connections at http://localhost:3100
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 GET /devices
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 Returned 200 in 14 ms
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 GET /.well-known/appspecific/com.chrome.devtools.json
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 GET /assets/index-CSvZPWDE.js
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 GET /assets/index-BTTc16dq.css
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 Returned 200 in 4 ms
+2026-04-11 11:44:59 +08:00:  HTTP  4/11/2026 11:44:59 AM ::1 Returned 200 in 5 ms
+2026-04-11 11:45:00 +08:00:  HTTP  4/11/2026 11:45:00 AM ::1 GET /api/settings
+2026-04-11 11:45:00 +08:00:  HTTP  4/11/2026 11:45:00 AM ::1 GET /api/devices
+2026-04-11 11:45:00 +08:00:  HTTP  4/11/2026 11:45:00 AM ::1 Returned 200 in 2 ms
+2026-04-11 11:45:00 +08:00:  HTTP  4/11/2026 11:45:00 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:45:00 +08:00:  HTTP  4/11/2026 11:45:00 AM ::1 GET /favicon.svg
+2026-04-11 11:45:00 +08:00:  HTTP  4/11/2026 11:45:00 AM ::1 Returned 200 in 2 ms
+2026-04-11 11:45:04 +08:00:  HTTP  4/11/2026 11:45:04 AM ::1 POST /api/devices/pair
+2026-04-11 11:45:04 +08:00:  HTTP  4/11/2026 11:45:04 AM ::1 Returned 200 in 1 ms
+2026-04-11 11:46:34 +08:00: 
+2026-04-11 11:46:34 +08:00:  INFO  Gracefully shutting down. Please wait...
+2026-04-11 11:49:21 +08:00: ✅ proxyflow 前端代理服务器启动 http://localhost:3100
+2026-04-11 11:49:21 +08:00:    静态文件: /Users/lishuai/work2/proxyflow/frontend/dist
+2026-04-11 11:49:21 +08:00:    API 代理: /api/* → http://127.0.0.1:9000
+2026-04-11 11:49:21 +08:00:    WS  代理: /ws/*  → ws://127.0.0.1:9000
