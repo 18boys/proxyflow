@@ -3,8 +3,9 @@ module.exports = {
     {
       name: 'proxyflow-backend',
       cwd: __dirname + '/backend',
-      script: 'dist/index.js',
-      interpreter: 'node',
+      script: 'src/index.ts',
+      interpreter: 'bun',
+      exec_mode: 'fork',
       instances: 1,
       autorestart: true,
       watch: false,

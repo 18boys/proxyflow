@@ -1,13 +1,13 @@
-import Database from 'better-sqlite3';
+import { Database } from 'bun:sqlite';
 import path from 'path';
 import fs from 'fs';
 import { SCHEMA } from './schema';
 
 const DB_PATH = path.join(__dirname, '..', 'proxyflow.db');
 
-let db: Database.Database;
+let db: Database;
 
-export function getDb(): Database.Database {
+export function getDb(): Database {
   if (!db) {
     try {
       db = new Database(DB_PATH);
@@ -23,8 +23,8 @@ export function getDb(): Database.Database {
         throw err;
       }
     }
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
+    db.exec('PRAGMA journal_mode = WAL');
+    db.exec('PRAGMA foreign_keys = ON');
   }
   return db;
 }
@@ -40,7 +40,7 @@ export function initializeDb(): void {
   syncSchema(database);
 }
 
-function syncSchema(database: Database.Database): void {
+function syncSchema(database: Database): void {
   // 获取当前数据库中所有表名
   const existingTables = new Set(
     (database.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).all() as { name: string }[])
