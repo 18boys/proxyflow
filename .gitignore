@@ -14,7 +14,7 @@ private.key
 AGENTS.md
 docs
 **/dist
-**/logs/*
+logs/
 *.log
 
 # 数据库文件
