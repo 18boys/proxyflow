@@ -4,9 +4,9 @@
   "description": "proxyflow backend API server",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "bun --watch src/index.ts",
     "build": "echo 'Skipping tsc build...'",
-    "start": "node dist/index.js"
+    "start": "bun src/index.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

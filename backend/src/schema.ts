@@ -50,6 +50,7 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     dns_ms:           'INTEGER',
     connect_ms:       'INTEGER',
     ttfb_ms:          'INTEGER',
+    share_token:      'TEXT',
     created_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
     updated_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },

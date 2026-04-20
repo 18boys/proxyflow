@@ -1,4 +1,4 @@
-import { Router, Response, Request } from 'express';
+import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
 
@@ -265,15 +265,16 @@ router.put('/:id/versions/:vid', requireAuth, (req: AuthRequest, res: Response):
 // DELETE /api/mocks/:id/versions/:vid
 router.delete('/:id/versions/:vid', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
-  const result = db.prepare(
-    'DELETE FROM mock_versions WHERE id = ? AND rule_id = ?'
-  ).run(Number(req.params['vid']), Number(req.params['id']));
+  const version = db.prepare(
+    'SELECT mv.* FROM mock_versions mv JOIN mock_rules mr ON mv.rule_id = mr.id WHERE mv.id = ? AND mr.id = ? AND mr.user_id = ?'
+  ).get(Number(req.params['vid']), Number(req.params['id']), req.userId!);
 
-  if (result.changes === 0) {
+  if (!version) {
     res.status(404).json({ error: 'Version not found' });
     return;
   }
 
+  db.prepare('DELETE FROM mock_versions WHERE id = ?').run(Number(req.params['vid']));
   res.json({ success: true });
 });
 
@@ -349,6 +350,56 @@ router.post('/data/import', requireAuth, (req: AuthRequest, res: Response): void
 
   doImport();
   res.json({ imported });
+});
+
+// POST /api/mocks/from-shared - create mock from a shared request (no ownership check)
+router.post('/from-shared', requireAuth, (req: AuthRequest, res: Response): void => {
+  const { shareToken, name, versionName } = req.body;
+
+  if (!shareToken || !name) {
+    res.status(400).json({ error: 'shareToken and name are required' });
+    return;
+  }
+
+  const db = getDb();
+  const log = db.prepare(
+    'SELECT * FROM request_logs WHERE share_token = ?'
+  ).get(shareToken) as Record<string, unknown> | undefined;
+
+  if (!log) {
+    res.status(404).json({ error: 'Shared request not found' });
+    return;
+  }
+
+  let urlPattern: string;
+  try {
+    urlPattern = new URL(log['url'] as string).pathname;
+  } catch {
+    urlPattern = (log['url'] as string).split('?')[0];
+  }
+
+  const ruleResult = db.prepare(`
+    INSERT INTO mock_rules (user_id, name, url_pattern, match_type, method, created_at, updated_at)
+    VALUES (?, ?, ?, 'wildcard', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+  `).run(req.userId!, name, urlPattern, log['method'] as string);
+
+  const ruleId = ruleResult.lastInsertRowid;
+
+  const versionResult = db.prepare(`
+    INSERT INTO mock_versions (rule_id, user_id, name, response_status, response_headers, response_body, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+  `).run(
+    ruleId, req.userId!, versionName || '200 OK',
+    (log['response_status'] as number) || 200,
+    log['response_headers'] as string || '{"Content-Type":"application/json"}',
+    log['response_body'] as string || '{}',
+  );
+
+  db.prepare('UPDATE mock_rules SET active_version_id = ? WHERE id = ?')
+    .run(versionResult.lastInsertRowid, ruleId);
+
+  const rule = db.prepare('SELECT * FROM mock_rules WHERE id = ?').get(ruleId);
+  res.status(201).json(rule);
 });
 
 // POST /api/mocks/from-request - create mock from a request log

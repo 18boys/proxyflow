@@ -338,4 +338,87 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   });
 });
 
+/**
+ * POST /api/relay/log
+ *
+ * Log-only endpoint: records a request/response pair without forwarding.
+ * Used by the SDK for requests it handles directly (e.g. FormData file uploads)
+ * where the actual network request is done by the native stack, but we still
+ * want visibility in the dashboard.
+ *
+ * Body: same shape as /api/relay but also accepts responseStatus / responseHeaders / responseBody.
+ */
+router.post('/log', async (req: Request, res: Response): Promise<void> => {
+  const {
+    method = 'GET',
+    url,
+    headers: reqHeaders = {},
+    body: reqBody = null,
+    sessionId,
+    responseStatus = null,
+    responseHeaders: resHeaders = {},
+    responseBody: resBody = null,
+    durationMs = null,
+  } = req.body as {
+    method?: string;
+    url?: string;
+    headers?: Record<string, string>;
+    body?: string | null;
+    sessionId?: string;
+    responseStatus?: number | null;
+    responseHeaders?: Record<string, string>;
+    responseBody?: string | null;
+    durationMs?: number | null;
+  };
+
+  if (!url) {
+    res.status(400).json({ error: 'url is required' });
+    return;
+  }
+
+  let userId: number | null = null;
+  let resolvedSessionId: string | null = null;
+
+  if (sessionId) {
+    const db = getDb();
+    const session = db.prepare(
+      'SELECT user_id FROM device_sessions WHERE session_id = ?'
+    ).get(sessionId) as { user_id: number } | undefined;
+    if (session) {
+      userId = session.user_id;
+      resolvedSessionId = sessionId;
+    }
+  }
+
+  const normalizedHeaders: Record<string, string> = {};
+  for (const [k, v] of Object.entries(reqHeaders)) {
+    if (typeof v === 'string') normalizedHeaders[k.toLowerCase()] = v;
+  }
+
+  const logId = await saveRequestLog({
+    userId,
+    sessionId: resolvedSessionId,
+    method: method.toUpperCase(),
+    url,
+    requestHeaders: normalizedHeaders,
+    requestBody: reqBody ?? null,
+    responseStatus: responseStatus ?? null,
+    responseHeaders: resHeaders,
+    responseBody: resBody ?? null,
+    durationMs: typeof durationMs === 'number' ? durationMs : null,
+    isMocked: false,
+    mockId: null,
+  });
+
+  const db2 = getDb();
+  const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
+  if (userId) {
+    await wsManager.broadcastToUser(userId, { type: 'new_request', log });
+  } else {
+    await wsManager.broadcastToAll({ type: 'new_request', log });
+  }
+
+  res.json({ ok: true });
+});
+
 export default router;

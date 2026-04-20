@@ -1,4 +1,5 @@
 import { Router, Response } from 'express';
+import { randomUUID } from 'crypto';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
 
@@ -115,6 +116,29 @@ router.get('/:id/curl', requireAuth, (req: AuthRequest, res: Response): void => 
   }
 
   res.json({ curl });
+});
+
+// POST /api/requests/:id/share - generate a permanent share token
+router.post('/:id/share', requireAuth, (req: AuthRequest, res: Response): void => {
+  const db = getDb();
+  const log = db.prepare(
+    'SELECT * FROM request_logs WHERE id = ? AND user_id = ?'
+  ).get(Number(req.params['id']), req.userId!) as Record<string, unknown> | undefined;
+
+  if (!log) {
+    res.status(404).json({ error: 'Request not found' });
+    return;
+  }
+
+  let shareToken = log['share_token'] as string | null;
+  if (!shareToken) {
+    shareToken = randomUUID();
+    db.prepare(
+      "UPDATE request_logs SET share_token = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?"
+    ).run(shareToken, Number(req.params['id']));
+  }
+
+  res.json({ share_token: shareToken });
 });
 
 export default router;

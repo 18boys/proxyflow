@@ -4,7 +4,7 @@ import { Request, Response, NextFunction } from 'express';
 import { getDb } from './db';
 
 const SECRET_KEY = process.env.JWT_SECRET || 'proxyflow-secret-key-change-in-production-2024';
-const TOKEN_EXPIRY = '7d';
+const TOKEN_EXPIRY = '30d';
 
 export interface JwtPayload {
   sub: string;  // user id as string

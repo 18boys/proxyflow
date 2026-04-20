@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Copy, Check, Bookmark, Clock, Pencil, X } from 'lucide-react';
+import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2 } from 'lucide-react';
 import type { RequestLog, MockRule, MockVersion } from '../types';
 import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
@@ -19,6 +19,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('response');
   const [copied, setCopied] = useState(false);
+  const [shared, setShared] = useState(false);
   const [showSaveMock, setShowSaveMock] = useState(false);
   const [mockName, setMockName] = useState('');
   const [saving, setSaving] = useState(false);
@@ -35,6 +36,21 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
       .catch(() => setLog(null))
       .finally(() => setLoading(false));
   }, [requestId]);
+
+  const handleShare = async () => {
+    if (!requestId) return;
+    try {
+      const { share_token } = await requestsApi.share(requestId);
+      const url = `${window.location.origin}/share/${share_token}`;
+      const success = await copyToClipboard(url);
+      if (success) {
+        setShared(true);
+        setTimeout(() => setShared(false), 2500);
+      }
+    } catch {
+      // ignore
+    }
+  };
 
   const handleCopyCurl = async () => {
     if (!requestId) return;
@@ -131,6 +147,13 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
             Save as Mock
           </button>
           <button
+            onClick={handleShare}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
+          >
+            {shared ? <Check size={12} className="text-green-400" /> : <Share2 size={12} />}
+            {shared ? 'Link Copied!' : 'Share'}
+          </button>
+          <button
             onClick={handleCopyCurl}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
           >
@@ -213,7 +236,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {activeTab === 'response' && (
           <>
-            <Section title="Response Headers">
+            <Section title="Response Headers" defaultCollapsed>
               <HeadersTable headers={responseHeaders} />
             </Section>
             <Section title="Response Body">
@@ -279,6 +302,7 @@ function MockTab({ log }: { log: RequestLog }) {
   // local state per rule: { activeVersionId, isActive }
   const [localState, setLocalState] = useState<Record<number, { vid: number | null; active: boolean }>>({});
   const [editingVersion, setEditingVersion] = useState<{ version: MockVersion; ruleId: number } | null>(null);
+  const [deletingVersionId, setDeletingVersionId] = useState<number | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -319,6 +343,26 @@ function MockTab({ log }: { log: RequestLog }) {
       });
     } finally {
       setOperating(null);
+    }
+  };
+
+  const handleDeleteVersion = async (ruleId: number, versionId: number) => {
+    if (!confirm('Delete this version?')) return;
+    setDeletingVersionId(versionId);
+    try {
+      await mocksApi.deleteVersion(ruleId, versionId);
+      setVersions((prev) => ({
+        ...prev,
+        [ruleId]: (prev[ruleId] || []).filter((v) => v.id !== versionId),
+      }));
+      // If the deleted version was active, clear local active state
+      setLocalState((prev) => {
+        const rs = prev[ruleId];
+        if (rs?.vid === versionId) return { ...prev, [ruleId]: { vid: null, active: false } };
+        return prev;
+      });
+    } finally {
+      setDeletingVersionId(null);
     }
   };
 
@@ -417,6 +461,14 @@ function MockTab({ log }: { log: RequestLog }) {
                       <Pencil size={11} />
                     </button>
                     <button
+                      onClick={() => handleDeleteVersion(rule.id, v.id)}
+                      disabled={deletingVersionId === v.id}
+                      title="Delete version"
+                      className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                    <button
                       onClick={() => isVersionActive ? handleDeactivate(rule.id) : handleApply(rule.id, v.id)}
                       disabled={isOperating}
                       className={`px-2 py-0.5 text-[10px] rounded transition-colors shrink-0 ${
@@ -456,11 +508,18 @@ function MockTab({ log }: { log: RequestLog }) {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, defaultCollapsed = false }: { title: string; children: React.ReactNode; defaultCollapsed?: boolean }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   return (
     <div>
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">{title}</p>
-      {children}
+      <button
+        onClick={() => setCollapsed(c => !c)}
+        className="flex items-center gap-1 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 hover:text-slate-200 transition-colors w-full text-left"
+      >
+        <ChevronRight size={12} className={`transition-transform shrink-0 ${collapsed ? '' : 'rotate-90'}`} />
+        {title}
+      </button>
+      {!collapsed && children}
     </div>
   );
 }

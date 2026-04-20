@@ -33,6 +33,7 @@ export interface RequestLog {
   dns_ms: number | null;
   connect_ms: number | null;
   ttfb_ms: number | null;
+  share_token: string | null;
   created_at: string;
 }
 

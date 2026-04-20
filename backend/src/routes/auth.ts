@@ -64,4 +64,10 @@ router.get('/me', requireAuth, (req: AuthRequest, res: Response): void => {
   res.json({ id: req.userId, email: req.userEmail });
 });
 
+// POST /api/auth/refresh - issue a new token (resets expiry)
+router.post('/refresh', requireAuth, (req: AuthRequest, res: Response): void => {
+  const token = createToken(req.userId!, req.userEmail!);
+  res.json({ token, user: { id: req.userId!, email: req.userEmail! } });
+});
+
 export default router;

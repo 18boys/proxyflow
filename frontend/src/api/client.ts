@@ -1,7 +1,18 @@
 const BASE_URL = '/api';
+const TOKEN_COOKIE = 'proxyflow_token';
+const TOKEN_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
+
+export function setTokenCookie(token: string) {
+  document.cookie = `${TOKEN_COOKIE}=${token}; max-age=${TOKEN_MAX_AGE}; path=/; SameSite=Strict`;
+}
+
+export function clearTokenCookie() {
+  document.cookie = `${TOKEN_COOKIE}=; max-age=0; path=/; SameSite=Strict`;
+}
 
 function getToken(): string | null {
-  return localStorage.getItem('proxyflow_token');
+  const match = document.cookie.match(new RegExp(`(?:^|; )${TOKEN_COOKIE}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
 }
 
 async function request<T>(
@@ -67,6 +78,7 @@ export const authApi = {
   login: (email: string, password: string) =>
     post<{ token: string; user: { id: number; email: string } }>('/auth/login', { email, password }),
   me: () => get<{ id: number; email: string }>('/auth/me'),
+  refresh: () => post<{ token: string; user: { id: number; email: string } }>('/auth/refresh'),
 };
 
 // ── Devices ───────────────────────────────────────────────────────────────
@@ -104,6 +116,17 @@ export const requestsApi = {
   get: (id: number) => get<import('../types').RequestLog>(`/requests/${id}`),
   clear: () => del('/requests'),
   getCurl: (id: number) => get<{ curl: string }>(`/requests/${id}/curl`),
+  share: (id: number) => post<{ share_token: string }>(`/requests/${id}/share`),
+  getShared: (token: string) =>
+    fetch(`${BASE_URL}/shared/${token}`).then((r) => {
+      if (!r.ok) throw new Error('Shared request not found');
+      return r.json() as Promise<import('../types').RequestLog>;
+    }),
+};
+
+// ── Stats ─────────────────────────────────────────────────────────────────
+export const statsApi = {
+  today: () => get<{ today_requests: number; today_online_users: number }>('/stats/today'),
 };
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
@@ -142,6 +165,8 @@ export const mocksApi = {
   import: (mocks: unknown[]) => post<{ imported: number }>('/mocks/data/import', { mocks }),
   fromRequest: (requestId: number, name: string, versionName?: string) =>
     post<import('../types').MockRule>('/mocks/from-request', { requestId, name, versionName }),
+  fromShared: (shareToken: string, name: string, versionName?: string) =>
+    post<import('../types').MockRule>('/mocks/from-shared', { shareToken, name, versionName }),
 };
 
 // ── Rules ─────────────────────────────────────────────────────────────────

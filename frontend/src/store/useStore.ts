@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { User, RequestLog, MockRule, DeviceSession } from '../types';
+import { setTokenCookie, clearTokenCookie } from '../api/client';
 
 interface AppState {
   // Auth
@@ -56,11 +57,11 @@ export const useStore = create<AppState>()(
       user: null,
       token: null,
       setAuth: (user, token) => {
-        localStorage.setItem('proxyflow_token', token);
+        setTokenCookie(token);
         set({ user, token });
       },
       logout: () => {
-        localStorage.removeItem('proxyflow_token');
+        clearTokenCookie();
         set({ user: null, token: null });
       },
 

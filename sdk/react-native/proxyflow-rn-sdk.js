@@ -108,6 +108,62 @@ function mergeRequestInit(input, init) {
   return merged;
 }
 
+/**
+ * 将 FormData 序列化为可读字符串，用于日志展示。
+ * 支持普通文本字段、标准 File/Blob 对象，以及 React Native 风格的 {uri, name, type} 对象。
+ */
+function serializeFormData(formData) {
+  var lines = [];
+  try {
+    formData.forEach(function (value, key) {
+      if (value === null || value === undefined) {
+        lines.push(key + ': (null)');
+      } else if (typeof value === 'string') {
+        lines.push(key + ': ' + value);
+      } else if (typeof value === 'object') {
+        // React Native file: { uri, name, type }
+        if (value.uri || value.name || value.type) {
+          var info = '[File';
+          if (value.name) info += ': ' + value.name;
+          if (value.type) info += ', type=' + value.type;
+          if (value.uri) info += ', uri=' + String(value.uri).slice(0, 80);
+          info += ']';
+          lines.push(key + ': ' + info);
+        } else if (typeof Blob !== 'undefined' && value instanceof Blob) {
+          // Standard Blob/File
+          var fname = value.name ? value.name : '';
+          lines.push(key + ': [Blob' + (fname ? ': ' + fname : '') + ', size=' + value.size + ', type=' + value.type + ']');
+        } else {
+          lines.push(key + ': ' + JSON.stringify(value));
+        }
+      } else {
+        lines.push(key + ': ' + String(value));
+      }
+    });
+  } catch (e) {
+    return '(FormData — could not serialize: ' + e.message + ')';
+  }
+  return lines.length > 0 ? lines.join('\n') : '(empty FormData)';
+}
+
+/**
+ * 异步上报 FormData 请求日志到 proxyflow（fire-and-forget，不影响主请求）。
+ */
+function logFormDataRequest(data) {
+  if (!_config.serverUrl) return;
+  var logUrl = _config.serverUrl + '/api/relay/log';
+  var originalFetch = _originalFetch || globalThis.fetch;
+  try {
+    originalFetch.call(globalThis, logUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    }).catch(function () { /* ignore log failures */ });
+  } catch (e) {
+    // ignore
+  }
+}
+
 // ─── 核心：relay fetch ────────────────────────────────────────────────────────
 
 /**
@@ -125,10 +181,64 @@ function relayFetch(input, init) {
   var url = extractUrl(input);
   var reqHeaders = normalizeHeaders(merged.headers);
 
-  // FormData 无法序列化为 JSON，直接走原始 fetch
+  // FormData：实际请求走原始 fetch（保留二进制/multipart），同时异步上报日志
   if (merged.body instanceof FormData) {
-    log('FormData detected, falling back to direct request for', url);
-    return (_originalFetch || globalThis.fetch).call(globalThis, input, init);
+    log('FormData detected, sending directly and logging async for', url);
+    var startTs = Date.now();
+    var originalFetchForForm = _originalFetch || globalThis.fetch;
+    var formPromise = originalFetchForForm.call(globalThis, input, init);
+
+    formPromise.then(function (response) {
+      var cloned = response.clone();
+      cloned.text().then(function (responseText) {
+        var resHeaders = {};
+        if (response.headers && typeof response.headers.forEach === 'function') {
+          response.headers.forEach(function (v, k) { resHeaders[k] = v; });
+        }
+        var formBody = serializeFormData(merged.body);
+        logFormDataRequest({
+          method: method,
+          url: url,
+          headers: reqHeaders,
+          body: formBody,
+          sessionId: _config.sessionId,
+          responseStatus: response.status,
+          responseHeaders: resHeaders,
+          responseBody: responseText,
+          durationMs: Date.now() - startTs,
+        });
+      }).catch(function () {
+        // response body read failed, log without body
+        var formBody = serializeFormData(merged.body);
+        logFormDataRequest({
+          method: method,
+          url: url,
+          headers: reqHeaders,
+          body: formBody,
+          sessionId: _config.sessionId,
+          responseStatus: response.status,
+          responseHeaders: {},
+          responseBody: null,
+          durationMs: Date.now() - startTs,
+        });
+      });
+    }).catch(function () {
+      // request failed entirely, still log the attempt
+      var formBody = serializeFormData(merged.body);
+      logFormDataRequest({
+        method: method,
+        url: url,
+        headers: reqHeaders,
+        body: formBody,
+        sessionId: _config.sessionId,
+        responseStatus: null,
+        responseHeaders: {},
+        responseBody: null,
+        durationMs: Date.now() - startTs,
+      });
+    });
+
+    return formPromise;
   }
 
   var body = null;
