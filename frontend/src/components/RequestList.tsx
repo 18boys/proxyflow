@@ -218,12 +218,12 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
     <div
       onClick={onClick}
       className={`group flex items-center gap-3 px-3 py-2 cursor-pointer border-b border-slate-800/50 hover:bg-slate-800/50 transition-colors text-xs border-l-2
-        ${isSelected
-          ? 'bg-cyan-500/10 border-l-cyan-500'
-          : req.is_mocked === 1
-            ? 'border-l-emerald-500/70 bg-emerald-500/5'
-            : isRed
-              ? 'border-l-red-500/50 bg-red-500/10'
+        ${isRed
+          ? isSelected ? 'bg-red-500/20 border-l-red-500' : 'border-l-red-500/50 bg-red-500/10'
+          : isSelected
+            ? 'bg-cyan-500/10 border-l-cyan-500'
+            : req.is_mocked === 1
+              ? 'border-l-emerald-500/70 bg-emerald-500/5'
               : 'border-l-transparent'
         }`}
     >
@@ -252,12 +252,12 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
       </div>
 
       {/* Path - fills remaining space */}
-      <div className={`${isRed && !isSelected ? 'text-red-400 font-semibold' : 'text-slate-300'} truncate font-mono text-[12px] flex-1 min-w-0`} title={displayPath}>
+      <div className={`${isRed ? 'text-red-400 font-semibold' : 'text-slate-300'} truncate font-mono text-[12px] flex-1 min-w-0`} title={displayPath}>
         {displayPath}
       </div>
 
       {/* Trailing details */}
-      <div className={`flex items-center gap-4 shrink-0 text-[11px] ${isRed && !isSelected ? 'text-red-400' : ''}`}>
+      <div className={`flex items-center gap-4 shrink-0 text-[11px] ${isRed ? 'text-red-400' : ''}`}>
         {req.response_status ? (
           <span className={`w-8 text-center font-mono font-semibold status-${statusColor}`}>
             {req.response_status}
