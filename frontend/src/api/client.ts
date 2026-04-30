@@ -81,11 +81,12 @@ export const authApi = {
   refresh: () => post<{ token: string; user: { id: number; email: string } }>('/auth/refresh'),
 };
 
-// ── Devices ───────────────────────────────────────────────────────────────
 export const devicesApi = {
   list: () => get<import('../types').DeviceSession[]>('/devices'),
   pair: (name: string) =>
-    post<{ sessionId: string; pairingToken: string; wsUrl: string; qrCode: string }>('/devices/pair', { name }),
+    post<{ sessionId: string; pairingToken: string; wsUrl: string; httpUrl: string; qrCode: string }>('/devices/pair', { name }),
+  getPairInfo: (sessionId: string) =>
+    get<{ sessionId: string; pairingToken: string; wsUrl: string; httpUrl: string; qrCode: string }>(`/devices/${sessionId}/pair-info`),
   disconnect: (sessionId: string) => del(`/devices/${sessionId}`),
   rename: (sessionId: string, name: string) => patch(`/devices/${sessionId}/name`, { name }),
   simulateOnline: (sessionId: string) =>

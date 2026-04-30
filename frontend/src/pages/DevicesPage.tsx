@@ -10,6 +10,7 @@ export default function DevicesPage() {
   const { devices, setDevices } = useStore();
   const [loading, setLoading] = useState(true);
   const [showPairModal, setShowPairModal] = useState(false);
+  const [viewQrSessionId, setViewQrSessionId] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState('');
 
@@ -126,6 +127,7 @@ export default function DevicesPage() {
                 onRenameChange={setRenameInput}
                 onRenameConfirm={() => handleRename(device.session_id)}
                 onRenameCancel={() => setRenaming(null)}
+                onViewQr={() => setViewQrSessionId(device.session_id)}
               />
             ))}
           </div>
@@ -193,10 +195,17 @@ export default function DevicesPage() {
 
       {showPairModal && (
         <PairModal
-          onClose={() => setShowPairModal(false)}
-          onPaired={(device) => {
-            setDevices([...devices, device]);
+          onClose={() => {
+            setShowPairModal(false);
+            loadDevices();
           }}
+        />
+      )}
+
+      {viewQrSessionId && (
+        <PairModal
+          existingSessionId={viewQrSessionId}
+          onClose={() => setViewQrSessionId(null)}
         />
       )}
     </div>
@@ -238,11 +247,12 @@ interface DeviceCardProps {
   onRenameChange: (v: string) => void;
   onRenameConfirm: () => void;
   onRenameCancel: () => void;
+  onViewQr: () => void;
 }
 
 function DeviceCard({
   device, onDisconnect, isRenaming, renameInput,
-  onStartRename, onRenameChange, onRenameConfirm, onRenameCancel
+  onStartRename, onRenameChange, onRenameConfirm, onRenameCancel, onViewQr
 }: DeviceCardProps) {
   const isOnline = device.last_seen ? (Date.now() - new Date(device.last_seen.replace(' ', 'T') + '+08:00').getTime() < 30 * 60 * 1000) : false;
   return (
@@ -291,6 +301,13 @@ function DeviceCard({
         </div>
         <div className="flex items-center gap-1">
 
+            <button
+              onClick={onViewQr}
+              className="p-1.5 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors"
+              title="View QR Code"
+            >
+              <QrCode size={12} />
+            </button>
           {!isRenaming && (
             <button
               onClick={onStartRename}
@@ -320,18 +337,28 @@ function DeviceCard({
 
 interface PairModalProps {
   onClose: () => void;
-  onPaired: (device: DeviceSession) => void;
+  existingSessionId?: string;
 }
 
-function PairModal({ onClose }: PairModalProps) {
+function PairModal({ onClose, existingSessionId }: PairModalProps) {
   const [deviceName, setDeviceName] = useState('My iPhone');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(!!existingSessionId);
   const [pairData, setPairData] = useState<{
     sessionId: string;
     wsUrl: string;
+    httpUrl: string;
     qrCode: string;
     pairingToken: string;
   } | null>(null);
+
+  useEffect(() => {
+    if (existingSessionId) {
+      setLoading(true);
+      devicesApi.getPairInfo(existingSessionId)
+        .then(setPairData)
+        .finally(() => setLoading(false));
+    }
+  }, [existingSessionId]);
 
   const handleGenerateQR = async () => {
     setLoading(true);
@@ -349,7 +376,7 @@ function PairModal({ onClose }: PairModalProps) {
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <div className="flex items-center gap-2">
             <QrCode size={16} className="text-cyan-400" />
-            <h2 className="text-base font-semibold text-slate-100">Pair New Device</h2>
+            <h2 className="text-base font-semibold text-slate-100">{existingSessionId ? 'Device QR Code' : 'Pair New Device'}</h2>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-slate-700 text-slate-400">
             <X size={16} />
@@ -357,7 +384,11 @@ function PairModal({ onClose }: PairModalProps) {
         </div>
 
         <div className="px-6 py-5 space-y-4">
-          {!pairData ? (
+          {loading ? (
+            <div className="flex justify-center my-8">
+              <div className="w-8 h-8 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+            </div>
+          ) : !pairData ? (
             <>
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1.5">Device Name</label>
@@ -370,12 +401,9 @@ function PairModal({ onClose }: PairModalProps) {
               </div>
               <button
                 onClick={handleGenerateQR}
-                disabled={loading}
                 className="btn-primary w-full flex items-center justify-center gap-2"
               >
-                {loading ? (
-                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                ) : <QrCode size={16} />}
+                <QrCode size={16} />
                 Generate QR Code
               </button>
               <p className="text-xs text-slate-500 text-center">
@@ -387,7 +415,7 @@ function PairModal({ onClose }: PairModalProps) {
               {/* QR Code */}
               <div className="bg-white p-4 rounded-xl">
                 <QRCode
-                  value={JSON.stringify({ wsUrl: pairData.wsUrl, sessionId: pairData.sessionId, pairingToken: pairData.pairingToken })}
+                  value={JSON.stringify({ wsUrl: pairData.wsUrl, httpUrl: pairData.httpUrl, sessionId: pairData.sessionId, pairingToken: pairData.pairingToken })}
                   size={200}
                 />
               </div>
@@ -395,7 +423,7 @@ function PairModal({ onClose }: PairModalProps) {
               <div className="w-full space-y-2 text-xs">
                 <CopyField label="Session ID (填入 SDK init)" value={pairData.sessionId} highlight />
                 <CopyField label="WSS Endpoint" value={pairData.wsUrl} />
-                <CopyField label="Pairing Token" value={pairData.pairingToken} />
+                <CopyField label="HTTP Endpoint" value={pairData.httpUrl} />
               </div>
 
               <div className="flex items-center gap-2 text-sm text-emerald-400">

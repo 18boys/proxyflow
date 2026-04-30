@@ -7,7 +7,7 @@ import { wsManager } from '../websocket';
 
 const router = Router();
 const HOST = process.env.HOST || 'localhost';
-const WS_PORT = process.env.PORT || '8000';
+const WS_PORT = process.env.PORT || '9000';
 
 // GET /api/devices
 router.get('/', requireAuth, (req: AuthRequest, res: Response): void => {
@@ -38,10 +38,11 @@ router.post('/pair', requireAuth, async (req: AuthRequest, res: Response): Promi
   ).run(sessionId, req.userId!, name || 'My Device', pairingToken);
 
   const wsUrl = `ws://${HOST}:${WS_PORT}/ws/device?token=${pairingToken}`;
-  const qrData = JSON.stringify({ wsUrl, sessionId, pairingToken });
+  const httpUrl = `http://${HOST}:${WS_PORT}`;
+  const qrData = JSON.stringify({ wsUrl, httpUrl, sessionId, pairingToken });
   const qrDataUrl = await QRCode.toDataURL(qrData, { width: 256, margin: 2 });
 
-  res.json({ sessionId, pairingToken, wsUrl, qrCode: qrDataUrl });
+  res.json({ sessionId, pairingToken, wsUrl, httpUrl, qrCode: qrDataUrl });
 });
 
 // DELETE /api/devices/:sessionId - disconnect device
@@ -61,6 +62,26 @@ router.delete('/:sessionId', requireAuth, (req: AuthRequest, res: Response): voi
   ).run(req.params['sessionId'], req.userId!);
 
   res.json({ success: true });
+});
+
+// GET /api/devices/:sessionId/pair-info - get QR code for an existing device
+router.get('/:sessionId/pair-info', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  const db = getDb();
+  const session = db.prepare(
+    'SELECT * FROM device_sessions WHERE session_id = ? AND user_id = ?'
+  ).get(req.params['sessionId'], req.userId!) as { session_id: string; pairing_token: string } | undefined;
+
+  if (!session) {
+    res.status(404).json({ error: 'Device not found' });
+    return;
+  }
+
+  const wsUrl = `ws://${HOST}:${WS_PORT}/ws/device?token=${session.pairing_token}`;
+  const httpUrl = `http://${HOST}:${WS_PORT}`;
+  const qrData = JSON.stringify({ wsUrl, httpUrl, sessionId: session.session_id, pairingToken: session.pairing_token });
+  const qrDataUrl = await QRCode.toDataURL(qrData, { width: 256, margin: 2 });
+
+  res.json({ sessionId: session.session_id, pairingToken: session.pairing_token, wsUrl, httpUrl, qrCode: qrDataUrl });
 });
 
 // POST /api/devices/:sessionId/simulate-online - mark device as online for testing (no real RN SDK needed)
