@@ -48,16 +48,7 @@ export default function DevicesPage() {
     setRenaming(null);
   };
 
-  const handleSimulateOnline = async (sessionId: string) => {
-    try {
-      await devicesApi.simulateOnline(sessionId);
-      setDevices(devices.map((d) =>
-        d.session_id === sessionId ? { ...d, is_online: 1 } : d
-      ));
-    } catch {
-      alert('Failed to simulate online status');
-    }
-  };
+
 
   const handleAddExclusion = () => {
     const domain = newDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -87,7 +78,7 @@ export default function DevicesPage() {
     }
   };
 
-  const onlineCount = devices.filter((d) => d.is_online).length;
+
 
   return (
     <div className="h-full flex flex-col overflow-y-auto">
@@ -96,7 +87,7 @@ export default function DevicesPage() {
         <div>
           <h1 className="text-lg font-semibold text-slate-100">Connected Devices</h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            {onlineCount} online, {devices.length - onlineCount} offline
+            {devices.filter(d => d.last_seen && (Date.now() - new Date(d.last_seen.replace(' ', 'T') + '+08:00').getTime() < 30 * 60 * 1000)).length} online
           </p>
         </div>
         <button
@@ -126,7 +117,6 @@ export default function DevicesPage() {
                 key={device.session_id}
                 device={device}
                 onDisconnect={() => handleDisconnect(device.session_id)}
-                onSimulateOnline={() => handleSimulateOnline(device.session_id)}
                 isRenaming={renaming === device.session_id}
                 renameInput={renameInput}
                 onStartRename={() => {
@@ -242,7 +232,6 @@ function CopyField({ label, value, highlight }: { label: string; value: string; 
 interface DeviceCardProps {
   device: DeviceSession;
   onDisconnect: () => void;
-  onSimulateOnline: () => void;
   isRenaming: boolean;
   renameInput: string;
   onStartRename: () => void;
@@ -252,17 +241,18 @@ interface DeviceCardProps {
 }
 
 function DeviceCard({
-  device, onDisconnect, onSimulateOnline, isRenaming, renameInput,
+  device, onDisconnect, isRenaming, renameInput,
   onStartRename, onRenameChange, onRenameConfirm, onRenameCancel
 }: DeviceCardProps) {
+  const isOnline = device.last_seen ? (Date.now() - new Date(device.last_seen.replace(' ', 'T') + '+08:00').getTime() < 30 * 60 * 1000) : false;
   return (
     <div className="card p-4">
       <div className="flex items-start justify-between mb-3">
         <div className="flex items-center gap-2">
           <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-            device.is_online ? 'bg-emerald-500/20' : 'bg-slate-700'
+            isOnline ? 'bg-emerald-500/20' : 'bg-slate-700'
           }`}>
-            <Smartphone size={16} className={device.is_online ? 'text-emerald-400' : 'text-slate-500'} />
+            <Smartphone size={16} className={isOnline ? 'text-emerald-400' : 'text-slate-500'} />
           </div>
           <div>
             {isRenaming ? (
@@ -288,27 +278,19 @@ function DeviceCard({
               <p className="text-sm font-medium text-slate-200">{device.name}</p>
             )}
             <div className="flex items-center gap-1.5 mt-0.5">
-              {device.is_online ? (
+              {isOnline ? (
                 <Wifi size={11} className="text-emerald-400" />
               ) : (
                 <WifiOff size={11} className="text-slate-500" />
               )}
-              <span className={`text-xs ${device.is_online ? 'text-emerald-400' : 'text-slate-500'}`}>
-                {device.is_online ? 'Online' : 'Offline'}
+              <span className={`text-xs ${isOnline ? 'text-emerald-400' : 'text-slate-500'}`}>
+                {isOnline ? 'Online' : 'Offline'}
               </span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-1">
-          {!device.is_online && !isRenaming && (
-            <button
-              onClick={onSimulateOnline}
-              title="Simulate online (for testing)"
-              className="p-1.5 rounded hover:bg-emerald-500/10 text-slate-500 hover:text-emerald-400 transition-colors"
-            >
-              <PlayCircle size={12} />
-            </button>
-          )}
+
           {!isRenaming && (
             <button
               onClick={onStartRename}
@@ -328,9 +310,9 @@ function DeviceCard({
       <div className="text-xs text-slate-600 font-mono space-y-0.5 mt-2">
         <CopyField label="Session ID" value={device.session_id} />
         {device.last_seen && (
-          <p className="mt-1">Last: {new Date(device.last_seen).toLocaleString()}</p>
+          <p className="mt-1">Last Request: {new Date(device.last_seen.replace(' ', 'T') + '+08:00').toLocaleString()}</p>
         )}
-        <p>Created: {new Date(device.created_at).toLocaleDateString()}</p>
+        <p>Created: {new Date(device.created_at.replace(' ', 'T') + '+08:00').toLocaleDateString()}</p>
       </div>
     </div>
   );

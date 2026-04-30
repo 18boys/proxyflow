@@ -84,7 +84,15 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
 
   if (!requestId) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-slate-600">
+      <div className="flex flex-col items-center justify-center h-full text-slate-600 relative">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        )}
         <div className="text-4xl mb-3">👆</div>
         <p className="text-sm">Select a request to view details</p>
       </div>
@@ -93,7 +101,15 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex items-center justify-center h-full relative">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        )}
         <div className="w-6 h-6 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
       </div>
     );
@@ -101,7 +117,15 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
 
   if (!log) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-500 text-sm">
+      <div className="flex items-center justify-center h-full text-slate-500 text-sm relative">
+        {onClose && (
+          <button
+            onClick={onClose}
+            className="absolute top-4 right-4 p-1 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+          >
+            <X size={16} />
+          </button>
+        )}
         Request not found
       </div>
     );
@@ -111,6 +135,18 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   const methodColor = getMethodColor(log.method);
   const requestHeaders = parseJson(log.request_headers) as Record<string, string> || {};
   const responseHeaders = parseJson(log.response_headers) as Record<string, string> || {};
+
+  const dateKey = Object.keys(responseHeaders).find(k => k.toLowerCase() === 'date');
+  if (dateKey && responseHeaders[dateKey]) {
+    try {
+      const d = new Date(responseHeaders[dateKey]);
+      if (!isNaN(d.getTime())) {
+        responseHeaders[dateKey] = d.toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) + ' (GMT+0800)';
+      }
+    } catch {
+      // ignore
+    }
+  }
 
   return (
     <div className="flex flex-col h-full">
@@ -247,7 +283,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
 
         {activeTab === 'request' && (
           <>
-            <Section title="Request Headers">
+            <Section title="Request Headers" defaultCollapsed>
               <HeadersTable headers={requestHeaders} />
             </Section>
             {log.request_body && (

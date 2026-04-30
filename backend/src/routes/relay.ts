@@ -111,6 +111,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     if (session) {
       userId = session.user_id;
       resolvedSessionId = sessionId;
+      db.prepare('UPDATE device_sessions SET last_seen = datetime(\'now\', \'+8 hours\'), updated_at = datetime(\'now\', \'+8 hours\') WHERE session_id = ?').run(sessionId);
     }
   }
 
@@ -387,6 +388,7 @@ router.post('/log', async (req: Request, res: Response): Promise<void> => {
     if (session) {
       userId = session.user_id;
       resolvedSessionId = sessionId;
+      db.prepare('UPDATE device_sessions SET last_seen = datetime(\'now\', \'+8 hours\'), updated_at = datetime(\'now\', \'+8 hours\') WHERE session_id = ?').run(sessionId);
     }
   }
 

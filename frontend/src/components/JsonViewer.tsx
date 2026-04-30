@@ -130,7 +130,7 @@ function syntaxHighlight(json: string): string {
   );
 }
 
-export default function JsonViewer({ data, maxHeight = '400px' }: JsonViewerProps) {
+export default function JsonViewer({ data, maxHeight = 'none' }: JsonViewerProps) {
   const [copied, setCopied] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 

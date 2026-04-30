@@ -2,7 +2,7 @@ import { useStore } from '../store/useStore';
 import { getStatusColor, getMethodColor } from '../types';
 import type { RequestLog } from '../types';
 import { Trash2, Filter, X, CheckSquare, Square } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { requestsApi } from '../api/client';
 
 interface RequestListProps {
@@ -20,11 +20,19 @@ const STATUS_OPTIONS = [
 export default function RequestList({ onSelectRequest }: RequestListProps) {
   const {
     requests, selectedRequestId, filters, setFilter, clearFilters,
-    selectedForDiagnosis, toggleDiagnosisSelection,
+    selectedForDiagnosis, toggleDiagnosisSelection, devices
   } = useStore();
   const [showFilters, setShowFilters] = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
   const setRequests = useStore((s) => s.setRequests);
+  const setDevices = useStore((s) => s.setDevices);
+
+  useEffect(() => {
+    // 确保组件挂载时加载设备列表，让下拉框有数据
+    import('../api/client').then(({ devicesApi }) => {
+      devicesApi.list().then(setDevices).catch(() => {});
+    });
+  }, [setDevices]);
 
   const filteredRequests = requests.filter((req) => {
     if (filters.url && !req.url.toLowerCase().includes(filters.url.toLowerCase())) return false;
@@ -118,18 +126,18 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
             </select>
           </div>
           <div className="flex gap-2">
-            <input
-              type="datetime-local"
-              value={filters.startTime}
-              onChange={(e) => setFilter('startTime', e.target.value)}
+            <select
+              value={filters.sessionId}
+              onChange={(e) => setFilter('sessionId', e.target.value)}
               className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            />
-            <input
-              type="datetime-local"
-              value={filters.endTime}
-              onChange={(e) => setFilter('endTime', e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            />
+            >
+              <option value="">All Devices</option>
+              {devices.map((d) => (
+                <option key={d.session_id} value={d.session_id}>
+                  {d.name || d.session_id.slice(0, 8)}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       )}
@@ -180,6 +188,32 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
     displayPath = req.url;
   }
 
+  let isRed = false;
+  if (req.response_body) {
+    try {
+      const parsed = JSON.parse(req.response_body);
+      if (parsed && typeof parsed === 'object') {
+        let codeValue = undefined;
+        // 支持 {"data": {"code": ...}} 或 {"code": ...} 格式
+        if (parsed.data && 'code' in parsed.data) {
+          codeValue = parsed.data.code;
+        } else if ('code' in parsed) {
+          codeValue = parsed.code;
+        }
+
+        if (codeValue !== undefined && codeValue !== null) {
+          const codeStr = String(codeValue);
+          // 如果 code 存在，且不等于 0 也不等于 200，则判定为错误（飘红）
+          if (codeStr !== '0' && codeStr !== '200') {
+            isRed = true;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   return (
     <div
       onClick={onClick}
@@ -188,7 +222,9 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
           ? 'bg-cyan-500/10 border-l-cyan-500'
           : req.is_mocked === 1
             ? 'border-l-emerald-500/70 bg-emerald-500/5'
-            : 'border-l-transparent'
+            : isRed
+              ? 'border-l-red-500/50 bg-red-500/10'
+              : 'border-l-transparent'
         }`}
     >
       {/* Diagnosis checkbox */}
@@ -216,12 +252,12 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
       </div>
 
       {/* Path - fills remaining space */}
-      <div className="text-slate-300 truncate font-mono text-[12px] flex-1 min-w-0" title={displayPath}>
+      <div className={`${isRed && !isSelected ? 'text-red-400 font-semibold' : 'text-slate-300'} truncate font-mono text-[12px] flex-1 min-w-0`} title={displayPath}>
         {displayPath}
       </div>
 
       {/* Trailing details */}
-      <div className="flex items-center gap-4 shrink-0 text-[11px]">
+      <div className={`flex items-center gap-4 shrink-0 text-[11px] ${isRed && !isSelected ? 'text-red-400' : ''}`}>
         {req.response_status ? (
           <span className={`w-8 text-center font-mono font-semibold status-${statusColor}`}>
             {req.response_status}
