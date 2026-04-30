@@ -415,15 +415,20 @@ function PairModal({ onClose, existingSessionId }: PairModalProps) {
               {/* QR Code */}
               <div className="bg-white p-4 rounded-xl">
                 <QRCode
-                  value={JSON.stringify({ wsUrl: pairData.wsUrl, httpUrl: pairData.httpUrl, sessionId: pairData.sessionId, pairingToken: pairData.pairingToken })}
+                  value={JSON.stringify({ 
+                    wsUrl: `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/device?token=${pairData.pairingToken}`, 
+                    httpUrl: window.location.origin, 
+                    sessionId: pairData.sessionId, 
+                    pairingToken: pairData.pairingToken 
+                  })}
                   size={200}
                 />
               </div>
 
               <div className="w-full space-y-2 text-xs">
                 <CopyField label="Session ID (填入 SDK init)" value={pairData.sessionId} highlight />
-                <CopyField label="WSS Endpoint" value={pairData.wsUrl} />
-                <CopyField label="HTTP Endpoint" value={pairData.httpUrl} />
+                <CopyField label="WSS Endpoint" value={`${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/device?token=${pairData.pairingToken}`} />
+                <CopyField label="HTTP Endpoint" value={window.location.origin} />
               </div>
 
               <div className="flex items-center gap-2 text-sm text-emerald-400">
