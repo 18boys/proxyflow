@@ -313,18 +313,23 @@ function matchesRule(rule: MockRule, log: RequestLog): boolean {
   try {
     path = new URL(log.url).pathname;
   } catch {
-    path = log.url;
+    path = log.url.split('?')[0];
   }
-  const pattern = rule.url_pattern;
+  let patternPath: string;
+  try {
+    patternPath = new URL(rule.url_pattern).pathname;
+  } catch {
+    patternPath = rule.url_pattern.split('?')[0];
+  }
   if (rule.match_type === 'exact') {
-    return path === pattern || log.url === pattern;
+    return path === patternPath;
   }
   if (rule.match_type === 'wildcard') {
-    const regexStr = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    const regexStr = patternPath.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
     try { return new RegExp(`^${regexStr}$`).test(path); } catch { return false; }
   }
   if (rule.match_type === 'regex') {
-    try { return new RegExp(pattern).test(path); } catch { return false; }
+    try { return new RegExp(rule.url_pattern).test(path); } catch { return false; }
   }
   return false;
 }
@@ -383,18 +388,24 @@ function MockTab({ log }: { log: RequestLog }) {
   };
 
   const handleDeleteVersion = async (ruleId: number, versionId: number) => {
-    if (!confirm('Delete this version?')) return;
+    const versionName = versions[ruleId]?.find((version) => version.id === versionId)?.name || 'this version';
+    if (!confirm(`Delete mock data “${versionName}”? This cannot be undone.`)) return;
     setDeletingVersionId(versionId);
     try {
-      await mocksApi.deleteVersion(ruleId, versionId);
+      const result = await mocksApi.deleteVersion(ruleId, versionId);
       setVersions((prev) => ({
         ...prev,
         [ruleId]: (prev[ruleId] || []).filter((v) => v.id !== versionId),
       }));
-      // If the deleted version was active, clear local active state
+      setRules((prev) => prev.map((rule) => rule.id === ruleId
+        ? { ...rule, ...result.rule, active_version: null }
+        : rule
+      ));
       setLocalState((prev) => {
         const rs = prev[ruleId];
-        if (rs?.vid === versionId) return { ...prev, [ruleId]: { vid: null, active: false } };
+        if (rs?.vid === versionId) {
+          return { ...prev, [ruleId]: { vid: null, active: false } };
+        }
         return prev;
       });
     } finally {
@@ -492,17 +503,17 @@ function MockTab({ log }: { log: RequestLog }) {
                     <button
                       onClick={() => setEditingVersion({ version: v, ruleId: rule.id })}
                       title="Edit mock data"
-                      className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors shrink-0"
+                      className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors shrink-0 text-[10px]"
                     >
-                      <Pencil size={11} />
+                      <Pencil size={11} /> Edit
                     </button>
                     <button
                       onClick={() => handleDeleteVersion(rule.id, v.id)}
                       disabled={deletingVersionId === v.id}
                       title="Delete version"
-                      className="p-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50"
+                      className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50 text-[10px]"
                     >
-                      <Trash2 size={11} />
+                      <Trash2 size={11} /> Delete
                     </button>
                     <button
                       onClick={() => isVersionActive ? handleDeactivate(rule.id) : handleApply(rule.id, v.id)}

@@ -199,12 +199,14 @@ function MockRuleCard({ rule, onEdit, onDelete }: {
         <div className="flex items-center gap-1 shrink-0">
           <button
             onClick={onEdit}
+            aria-label={`Edit ${rule.name}`}
             className="p-2 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
           >
             <Edit2 size={14} />
           </button>
           <button
             onClick={onDelete}
+            aria-label={`Delete ${rule.name}`}
             className="p-2 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition-colors"
           >
             <Trash2 size={14} />

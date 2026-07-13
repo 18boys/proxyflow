@@ -121,7 +121,12 @@ export const requestsApi = {
   getShared: (token: string) =>
     fetch(`${BASE_URL}/shared/${token}`).then((r) => {
       if (!r.ok) throw new Error('Shared request not found');
-      return r.json() as Promise<import('../types').RequestLog>;
+      return r.json() as Promise<import('../types').SharedRequest>;
+    }),
+  getSharedCurl: (token: string) =>
+    fetch(`${BASE_URL}/shared/${token}/curl`).then((r) => {
+      if (!r.ok) throw new Error('Shared request not found');
+      return r.json() as Promise<{ curl: string }>;
     }),
 };
 
@@ -159,7 +164,8 @@ export const mocksApi = {
   }) => post<import('../types').MockVersion>(`/mocks/${id}/versions`, data),
   updateVersion: (id: number, vid: number, data: Partial<import('../types').MockVersion>) =>
     put<import('../types').MockVersion>(`/mocks/${id}/versions/${vid}`, data),
-  deleteVersion: (id: number, vid: number) => del(`/mocks/${id}/versions/${vid}`),
+  deleteVersion: (id: number, vid: number) =>
+    del<{ success: boolean; rule: import('../types').MockRule }>(`/mocks/${id}/versions/${vid}`),
   selectVersion: (id: number, vid: number) =>
     post(`/mocks/${id}/versions/${vid}/select`),
   export: () => get<{ mocks: import('../types').MockRule[] }>('/mocks/data/export'),

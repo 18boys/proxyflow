@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy } from 'lucide-react';
+import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy, ChevronRight } from 'lucide-react';
 import type { MockRule, MockVersion } from '../types';
 import { mocksApi, streamAiRequest } from '../api/client';
 
@@ -49,7 +49,7 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
           condition_field_key: condKey || undefined,
           condition_field_value: condValue || undefined,
         } as Partial<MockRule>);
-        if (selectedVersionId && selectedVersionId !== rule.active_version_id) {
+        if (selectedVersionId !== rule.active_version_id) {
           await mocksApi.update(rule.id, { active_version_id: selectedVersionId } as Partial<MockRule>);
         }
       } else {
@@ -135,20 +135,35 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
               </select>
             </div>
             <div className="col-span-2">
-              <label className="block text-xs font-medium text-slate-400 mb-1">
-                Delay: <span className="text-cyan-400">{delayMs}ms</span>
-              </label>
+              <div className="flex items-center justify-between gap-3 mb-1">
+                <label htmlFor="mock-delay" className="block text-xs font-medium text-slate-400">
+                  Delay Response
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <input
+                    id="mock-delay"
+                    type="number"
+                    min={0}
+                    max={60000}
+                    step={100}
+                    value={delayMs}
+                    onChange={(e) => setDelayMs(Math.min(60000, Math.max(0, Number(e.target.value) || 0)))}
+                    className="input-field w-24 py-1 text-xs text-right font-mono"
+                  />
+                  <span className="text-xs text-slate-500">ms</span>
+                </div>
+              </div>
               <input
                 type="range"
                 min={0}
-                max={5000}
-                step={100}
+                max={60000}
+                step={1}
                 value={delayMs}
                 onChange={(e) => setDelayMs(Number(e.target.value))}
                 className="w-full accent-cyan-500"
               />
               <div className="flex justify-between text-xs text-slate-600 mt-0.5">
-                <span>0ms</span><span>5000ms</span>
+                <span>立即返回</span><span>60 秒</span>
               </div>
             </div>
           </div>
@@ -206,8 +221,10 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
                       setEditingVersion(copied);
                     }}
                     onDelete={async () => {
+                      if (!confirm(`Delete mock data “${v.name}”?`)) return;
                       await mocksApi.deleteVersion(rule.id, v.id);
-                      setVersions(versions.filter((x) => x.id !== v.id));
+                      setVersions((prev) => prev.filter((x) => x.id !== v.id));
+                      if (selectedVersionId === v.id) setSelectedVersionId(null);
                     }}
                   />
                 ))}
@@ -282,7 +299,11 @@ function VersionRow({
       <button onClick={onCopy} title="Duplicate version" className="p-1 rounded hover:bg-slate-700 text-slate-500 hover:text-cyan-400">
         <Copy size={12} />
       </button>
-      <button onClick={onDelete} className="p-1 rounded hover:bg-red-500/10 text-slate-500 hover:text-red-400">
+      <button
+        onClick={onDelete}
+        aria-label={`Delete ${version.name}`}
+        className="p-1 rounded hover:bg-red-500/10 text-slate-500 hover:text-red-400"
+      >
         <Trash2 size={12} />
       </button>
     </div>
@@ -436,6 +457,7 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
   const [name, setName] = useState(version.name);
   const [status, setStatus] = useState(version.response_status);
   const [headers, setHeaders] = useState(version.response_headers || '{}');
+  const [headersCollapsed, setHeadersCollapsed] = useState(true);
   const [body, setBody] = useState(version.response_body);
   const [bodyError, setBodyError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -536,11 +558,27 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
           </div>
 
           {/* Response Headers */}
-          <div>
-            <label className="block text-xs font-medium text-slate-400 mb-2">Response Headers</label>
-            <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-3">
-              <HeadersEditor value={headers} onChange={setHeaders} />
-            </div>
+          <div className="border border-slate-700 rounded-lg overflow-hidden bg-slate-800/30">
+            <button
+              type="button"
+              onClick={() => setHeadersCollapsed((value) => !value)}
+              className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-800/70 transition-colors"
+              aria-expanded={!headersCollapsed}
+            >
+              <ChevronRight
+                size={13}
+                className={`text-slate-500 transition-transform ${headersCollapsed ? '' : 'rotate-90'}`}
+              />
+              <span className="text-xs font-medium text-slate-400">Response Headers</span>
+              <span className="ml-auto text-[10px] text-slate-600">
+                {parseHeaders(headers).length} 项 · {headersCollapsed ? '点击编辑' : '点击折叠'}
+              </span>
+            </button>
+            {!headersCollapsed && (
+              <div className="border-t border-slate-700 p-3">
+                <HeadersEditor value={headers} onChange={setHeaders} />
+              </div>
+            )}
           </div>
 
           {/* Response Body */}

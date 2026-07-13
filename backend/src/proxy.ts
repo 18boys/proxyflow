@@ -27,8 +27,8 @@ interface MockVersion {
   response_body: string;
 }
 
-function matchUrlPattern(pattern: string, url: string, matchType: string): boolean {
-  // Extract just the pathname (and optional search) from the full URL
+export function matchUrlPattern(pattern: string, url: string, matchType: string): boolean {
+  // Only the pathname participates in matching. Query parameters never affect mocks.
   // e.g. "http://example.com/api/users/123?foo=bar" -> "/api/users/123"
   let urlToMatch: string;
   try {
@@ -48,16 +48,14 @@ function matchUrlPattern(pattern: string, url: string, matchType: string): boole
   }
 
   if (matchType === 'exact') {
-    // Support both full URL match and path-only match
-    return urlToMatch === patternPath || url === pattern;
+    return urlToMatch === patternPath;
   } else if (matchType === 'wildcard') {
     // Convert wildcard pattern to regex
     const regexStr = patternPath.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
     return new RegExp(`^${regexStr}$`).test(urlToMatch);
   } else if (matchType === 'regex') {
     try {
-      // Try matching against both full URL and path
-      return new RegExp(pattern).test(url) || new RegExp(pattern).test(urlToMatch);
+      return new RegExp(pattern).test(urlToMatch);
     } catch {
       return false;
     }

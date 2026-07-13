@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Bookmark, Check, LogIn } from 'lucide-react';
+import { Bookmark, Check, LogIn, Copy, ChevronRight } from 'lucide-react';
 import { requestsApi, mocksApi } from '../api/client';
 import { useStore } from '../store/useStore';
-import type { RequestLog } from '../types';
+import type { SharedRequest } from '../types';
 import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from '../components/JsonViewer';
+import { copyToClipboard } from '../utils/clipboard';
 
 export default function SharedRequestPage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const user = useStore((s) => s.user);
 
-  const [log, setLog] = useState<RequestLog | null>(null);
+  const [log, setLog] = useState<SharedRequest | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +22,7 @@ export default function SharedRequestPage() {
   const [mockName, setMockName] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [curlCopied, setCurlCopied] = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -67,6 +69,19 @@ export default function SharedRequestPage() {
   const methodColor = getMethodColor(log.method);
   const requestHeaders = parseJson(log.request_headers) as Record<string, string> || {};
   const responseHeaders = parseJson(log.response_headers) as Record<string, string> || {};
+  let queryParams: Array<[string, string]> = [];
+  try {
+    queryParams = Array.from(new URL(log.url).searchParams.entries());
+  } catch {
+    // The URL is already shown above; invalid URLs simply have no parsed parameters.
+  }
+
+  const handleCopyCurl = async () => {
+    if (await copyToClipboard(log.curl)) {
+      setCurlCopied(true);
+      setTimeout(() => setCurlCopied(false), 2000);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100">
@@ -157,13 +172,40 @@ export default function SharedRequestPage() {
         )}
 
         <div className="space-y-6">
-          <Section title="Response Headers">
+          {queryParams.length > 0 && (
+            <Section title={`Request Parameters (${queryParams.length})`}>
+              <div className="overflow-hidden rounded-lg border border-slate-700/70">
+                {queryParams.map(([key, value], index) => (
+                  <div
+                    key={`${key}-${index}`}
+                    className="grid grid-cols-[minmax(120px,1fr)_2fr] border-b border-slate-700/70 last:border-b-0 text-xs font-mono"
+                  >
+                    <span className="px-3 py-2 text-cyan-400 bg-slate-900/40 break-all">{key}</span>
+                    <span className="px-3 py-2 text-slate-300 break-all">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+          <Section title="Replay with cURL">
+            <div className="relative rounded-lg border border-slate-700 bg-slate-950/70 p-3 pr-24">
+              <pre className="text-xs font-mono text-slate-300 whitespace-pre-wrap break-all">{log.curl}</pre>
+              <button
+                onClick={handleCopyCurl}
+                className="absolute right-2 top-2 flex items-center gap-1.5 rounded-md bg-slate-700 px-2 py-1.5 text-xs text-slate-300 hover:bg-slate-600"
+              >
+                {curlCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                {curlCopied ? 'Copied' : 'Copy'}
+              </button>
+            </div>
+          </Section>
+          <Section title="Response Headers" defaultCollapsed>
             <HeadersTable headers={responseHeaders} />
           </Section>
           <Section title="Response Body">
             <JsonViewer data={parseJson(log.response_body) ?? log.response_body} maxHeight="500px" />
           </Section>
-          <Section title="Request Headers">
+          <Section title="Request Headers" defaultCollapsed>
             <HeadersTable headers={requestHeaders} />
           </Section>
           {log.request_body && (
@@ -177,11 +219,24 @@ export default function SharedRequestPage() {
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ title, children, defaultCollapsed = false }: {
+  title: string;
+  children: React.ReactNode;
+  defaultCollapsed?: boolean;
+}) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   return (
     <div className="bg-slate-800/40 border border-slate-700/60 rounded-xl p-4">
-      <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">{title}</p>
-      {children}
+      <button
+        type="button"
+        onClick={() => setCollapsed((value) => !value)}
+        className={`flex w-full items-center gap-1 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider hover:text-slate-200 ${collapsed ? '' : 'mb-3'}`}
+        aria-expanded={!collapsed}
+      >
+        <ChevronRight size={12} className={`transition-transform ${collapsed ? '' : 'rotate-90'}`} />
+        {title}
+      </button>
+      {!collapsed && children}
     </div>
   );
 }

@@ -55,6 +55,16 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     updated_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },
 
+  shared_requests: {
+    id:                'INTEGER PRIMARY KEY AUTOINCREMENT',
+    share_token:       'TEXT UNIQUE NOT NULL',
+    owner_user_id:     'INTEGER NOT NULL REFERENCES users(id)',
+    source_request_id: 'INTEGER',
+    request_snapshot:  'TEXT NOT NULL',
+    created_at:        "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+    updated_at:        "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
+
   mock_rules: {
     id:                    'INTEGER PRIMARY KEY AUTOINCREMENT',
     user_id:               'INTEGER NOT NULL REFERENCES users(id)',

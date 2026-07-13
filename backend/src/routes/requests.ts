@@ -2,6 +2,8 @@ import { Router, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
+import { buildCurl } from '../requestReplay';
+import { createSharedRequest } from '../sharedRequests';
 
 const router = Router();
 
@@ -100,22 +102,7 @@ router.get('/:id/curl', requireAuth, (req: AuthRequest, res: Response): void => 
     return;
   }
 
-  const headers = JSON.parse(log['request_headers'] as string || '{}') as Record<string, string>;
-  let curl = `curl -X ${log['method']} '${log['url']}'`;
-
-  // Add headers
-  for (const [key, value] of Object.entries(headers)) {
-    if (key.toLowerCase() !== 'host') {
-      curl += ` \\\n  -H '${key}: ${value}'`;
-    }
-  }
-
-  // Add body
-  if (log['request_body']) {
-    curl += ` \\\n  -d '${(log['request_body'] as string).replace(/'/g, "'\\''")}'`;
-  }
-
-  res.json({ curl });
+  res.json({ curl: buildCurl(log) });
 });
 
 // POST /api/requests/:id/share - generate a permanent share token
@@ -133,10 +120,15 @@ router.post('/:id/share', requireAuth, (req: AuthRequest, res: Response): void =
   let shareToken = log['share_token'] as string | null;
   if (!shareToken) {
     shareToken = randomUUID();
+  }
+
+  const saveShare = db.transaction(() => {
     db.prepare(
       "UPDATE request_logs SET share_token = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?"
     ).run(shareToken, Number(req.params['id']));
-  }
+    createSharedRequest(shareToken!, log);
+  });
+  saveShare();
 
   res.json({ share_token: shareToken });
 });

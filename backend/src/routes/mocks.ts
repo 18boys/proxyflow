@@ -1,8 +1,15 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
+import { getSharedRequest } from '../sharedRequests';
 
 const router = Router();
+
+function parseDelayMs(value: unknown): number | null {
+  const delay = Number(value);
+  if (!Number.isFinite(delay) || delay < 0 || delay > 60_000) return null;
+  return Math.round(delay);
+}
 
 // GET /api/mocks - list rules with search
 router.get('/', requireAuth, (req: AuthRequest, res: Response): void => {
@@ -49,6 +56,12 @@ router.post('/', requireAuth, (req: AuthRequest, res: Response): void => {
     return;
   }
 
+  const normalizedDelayMs = parseDelayMs(delay_ms);
+  if (normalizedDelayMs === null) {
+    res.status(400).json({ error: 'delay_ms must be between 0 and 60000' });
+    return;
+  }
+
   const db = getDb();
   const result = db.prepare(`
     INSERT INTO mock_rules
@@ -56,7 +69,7 @@ router.post('/', requireAuth, (req: AuthRequest, res: Response): void => {
        condition_field_type, condition_field_key, condition_field_value, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
   `).run(
-    req.userId!, name, url_pattern, match_type, method || null, delay_ms,
+    req.userId!, name, url_pattern, match_type, method || null, normalizedDelayMs,
     condition_field_type || null, condition_field_key || null, condition_field_value || null,
   );
 
@@ -96,6 +109,21 @@ router.put('/:id', requireAuth, (req: AuthRequest, res: Response): void => {
     active_version_id, delay_ms, condition_field_type, condition_field_key, condition_field_value,
   } = req.body;
 
+  if (delay_ms !== undefined && parseDelayMs(delay_ms) === null) {
+    res.status(400).json({ error: 'delay_ms must be between 0 and 60000' });
+    return;
+  }
+
+  if (active_version_id !== undefined && active_version_id !== null) {
+    const ownedVersion = db.prepare(
+      'SELECT id FROM mock_versions WHERE id = ? AND rule_id = ? AND user_id = ?'
+    ).get(Number(active_version_id), Number(req.params['id']), req.userId!);
+    if (!ownedVersion) {
+      res.status(400).json({ error: 'active_version_id must belong to this mock rule' });
+      return;
+    }
+  }
+
   db.prepare(`
     UPDATE mock_rules SET
       name = COALESCE(?, name),
@@ -115,7 +143,7 @@ router.put('/:id', requireAuth, (req: AuthRequest, res: Response): void => {
     method !== undefined ? method : rule['method'],
     is_active !== undefined ? (is_active ? 1 : 0) : null,
     active_version_id !== undefined ? active_version_id : rule['active_version_id'],
-    delay_ms !== undefined ? delay_ms : null,
+    delay_ms !== undefined ? parseDelayMs(delay_ms) : null,
     condition_field_type !== undefined ? condition_field_type : rule['condition_field_type'],
     condition_field_key !== undefined ? condition_field_key : rule['condition_field_key'],
     condition_field_value !== undefined ? condition_field_value : rule['condition_field_value'],
@@ -266,24 +294,50 @@ router.put('/:id/versions/:vid', requireAuth, (req: AuthRequest, res: Response):
 router.delete('/:id/versions/:vid', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
   const version = db.prepare(
-    'SELECT mv.* FROM mock_versions mv JOIN mock_rules mr ON mv.rule_id = mr.id WHERE mv.id = ? AND mr.id = ? AND mr.user_id = ?'
-  ).get(Number(req.params['vid']), Number(req.params['id']), req.userId!);
+    'SELECT mv.*, mr.active_version_id FROM mock_versions mv JOIN mock_rules mr ON mv.rule_id = mr.id WHERE mv.id = ? AND mr.id = ? AND mr.user_id = ?'
+  ).get(Number(req.params['vid']), Number(req.params['id']), req.userId!) as Record<string, unknown> | undefined;
 
   if (!version) {
     res.status(404).json({ error: 'Version not found' });
     return;
   }
 
-  db.prepare('DELETE FROM mock_versions WHERE id = ?').run(Number(req.params['vid']));
-  res.json({ success: true });
+  const deleteVersion = db.transaction(() => {
+    db.prepare('DELETE FROM mock_versions WHERE id = ?').run(Number(req.params['vid']));
+    if (Number(version['active_version_id']) === Number(req.params['vid'])) {
+      db.prepare(`
+        UPDATE mock_rules
+        SET active_version_id = NULL, is_active = 0, updated_at = datetime('now', '+8 hours')
+        WHERE id = ? AND user_id = ?
+      `).run(Number(req.params['id']), req.userId!);
+    }
+  });
+  deleteVersion();
+
+  const rule = db.prepare(
+    'SELECT * FROM mock_rules WHERE id = ? AND user_id = ?'
+  ).get(Number(req.params['id']), req.userId!);
+  res.json({ success: true, rule });
 });
 
 // POST /api/mocks/:id/versions/:vid/select - activate this version
 router.post('/:id/versions/:vid/select', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
-  db.prepare(
+  const version = db.prepare(
+    'SELECT id FROM mock_versions WHERE id = ? AND rule_id = ? AND user_id = ?'
+  ).get(Number(req.params['vid']), Number(req.params['id']), req.userId!);
+  if (!version) {
+    res.status(404).json({ error: 'Version not found' });
+    return;
+  }
+
+  const result = db.prepare(
     'UPDATE mock_rules SET active_version_id = ?, updated_at = datetime(\'now\') WHERE id = ? AND user_id = ?'
   ).run(Number(req.params['vid']), Number(req.params['id']), req.userId!);
+  if (result.changes === 0) {
+    res.status(404).json({ error: 'Mock rule not found' });
+    return;
+  }
   res.json({ success: true });
 });
 
@@ -362,9 +416,7 @@ router.post('/from-shared', requireAuth, (req: AuthRequest, res: Response): void
   }
 
   const db = getDb();
-  const log = db.prepare(
-    'SELECT * FROM request_logs WHERE share_token = ?'
-  ).get(shareToken) as Record<string, unknown> | undefined;
+  const log = getSharedRequest(shareToken);
 
   if (!log) {
     res.status(404).json({ error: 'Shared request not found' });

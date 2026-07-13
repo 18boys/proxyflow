@@ -37,6 +37,10 @@ export interface RequestLog {
   created_at: string;
 }
 
+export interface SharedRequest extends RequestLog {
+  curl: string;
+}
+
 export interface MockVersion {
   id: number;
   rule_id: number;
