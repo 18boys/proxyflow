@@ -144,6 +144,7 @@ export const mocksApi = {
   create: (data: {
     name: string;
     url_pattern: string;
+    folder_id?: number | null;
     match_type?: string;
     method?: string;
     delay_ms?: number;
@@ -168,17 +169,20 @@ export const mocksApi = {
     del<{ success: boolean; rule: import('../types').MockRule }>(`/mocks/${id}/versions/${vid}`),
   selectVersion: (id: number, vid: number) =>
     post(`/mocks/${id}/versions/${vid}/select`),
-  export: () => get<{ mocks: import('../types').MockRule[] }>('/mocks/data/export'),
+  export: () => get<{ folders: import('../types').MockFolder[]; mocks: import('../types').MockRule[] }>('/mocks/data/export'),
   import: (mocks: unknown[]) => post<{ imported: number }>('/mocks/data/import', { mocks }),
-  fromRequest: (requestId: number, name: string, versionName?: string) =>
-    post<import('../types').MockRule>('/mocks/from-request', { requestId, name, versionName }),
-  fromShared: (shareToken: string, name: string, versionName?: string) =>
-    post<import('../types').MockRule>('/mocks/from-shared', { shareToken, name, versionName }),
+  fromRequest: (requestId: number, name: string, versionName?: string, folderId?: number | null) =>
+    post<import('../types').MockRule>('/mocks/from-request', { requestId, name, versionName, folderId }),
+  fromShared: (shareToken: string, name: string, versionName?: string, folderId?: number | null) =>
+    post<import('../types').MockRule>('/mocks/from-shared', { shareToken, name, versionName, folderId }),
+  listFolders: () => get<import('../types').MockFolder[]>('/mocks/folders'),
+  createFolder: (name: string) => post<import('../types').MockFolder>('/mocks/folders', { name }),
+  updateFolder: (id: number, name: string) => put<import('../types').MockFolder>(`/mocks/folders/${id}`, { name }),
+  deleteFolder: (id: number) => del(`/mocks/folders/${id}`),
 };
 
 // ── Rules ─────────────────────────────────────────────────────────────────
 export const rulesApi = {
-  list: () => get<import('../types').MockRule[]>('/rules'),
   setGlobal: (mode: 'mock' | 'proxy') => post('/rules/global', { mode }),
   toggle: (id: number) => patch<{ is_active: number }>(`/rules/${id}/toggle`),
   setVersion: (id: number, versionId: number) => patch(`/rules/${id}/version`, { versionId }),
@@ -255,4 +259,18 @@ export const settingsApi = {
   get: () => get<{ exclusion_domains: string[] }>('/settings'),
   updateExclusions: (domains: string[]) =>
     put<{ exclusion_domains: string[] }>('/settings/exclusions', { domains }),
+  getAi: () => get<import('../types').AiSettings>('/settings/ai'),
+  updateAi: (data: {
+    enabled: boolean;
+    protocol: import('../types').AiProtocol;
+    endpoint: string;
+    model: string;
+    api_key?: string | null;
+  }) => put<import('../types').AiSettings>('/settings/ai', data),
+  testAi: (data: {
+    protocol: import('../types').AiProtocol;
+    endpoint: string;
+    model: string;
+    api_key?: string | null;
+  }) => post<{ success: boolean; message: string }>('/settings/ai/test', data),
 };

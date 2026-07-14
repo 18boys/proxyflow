@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
-  Activity, Layers, GitBranch, Smartphone, LogOut, Moon, Sun, Zap
+  Activity, Layers, Smartphone, LogOut, Moon, Sun, Zap, Settings
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { useEffect, useRef } from 'react';
@@ -8,9 +8,9 @@ import type { RequestLog } from '../types';
 
 const NAV_ITEMS = [
   { to: '/dashboard', icon: Activity, label: 'Monitor' },
-  { to: '/rules', icon: GitBranch, label: 'Routes' },
   { to: '/mocks', icon: Layers, label: 'Mocks' },
   { to: '/devices', icon: Smartphone, label: 'Devices' },
+  { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 export default function Layout() {

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2 } from 'lucide-react';
-import type { RequestLog, MockRule, MockVersion } from '../types';
+import type { MockFolder, RequestLog, MockRule, MockVersion } from '../types';
 import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
 import { requestsApi, mocksApi } from '../api/client';
@@ -22,6 +22,8 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   const [shared, setShared] = useState(false);
   const [showSaveMock, setShowSaveMock] = useState(false);
   const [mockName, setMockName] = useState('');
+  const [mockFolderId, setMockFolderId] = useState<number | null>(null);
+  const [mockFolders, setMockFolders] = useState<MockFolder[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
@@ -36,6 +38,10 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
       .catch(() => setLog(null))
       .finally(() => setLoading(false));
   }, [requestId]);
+
+  useEffect(() => {
+    mocksApi.listFolders().then(setMockFolders).catch(() => setMockFolders([]));
+  }, []);
 
   const handleShare = async () => {
     if (!requestId) return;
@@ -70,7 +76,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
     if (!log || !mockName.trim()) return;
     setSaving(true);
     try {
-      await mocksApi.fromRequest(log.id, mockName, '200 OK');
+      await mocksApi.fromRequest(log.id, mockName, '200 OK', mockFolderId);
       setSaveSuccess(true);
       setShowSaveMock(false);
       setMockName('');
@@ -212,15 +218,26 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
       {showSaveMock && (
         <div className="mx-4 mt-3 p-3 bg-slate-800 border border-slate-700 rounded-lg">
           <p className="text-xs font-medium text-slate-200 mb-2">Save as Mock</p>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <input
               type="text"
               placeholder="Rule name (e.g. Get User API)"
               value={mockName}
               onChange={(e) => setMockName(e.target.value)}
-              className="flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
+              className="min-w-56 flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
               autoFocus
             />
+            <select
+              value={mockFolderId ?? ''}
+              onChange={(event) => setMockFolderId(event.target.value ? Number(event.target.value) : null)}
+              aria-label="Mock folder"
+              className="bg-slate-900 border border-slate-600 text-slate-300 text-xs rounded px-2 py-1.5"
+            >
+              <option value="">Unfiled</option>
+              {mockFolders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
             <button
               onClick={handleSaveMock}
               disabled={saving || !mockName.trim()}

@@ -1,13 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy, ChevronRight } from 'lucide-react';
-import type { MockRule, MockVersion } from '../types';
+import type { MockFolder, MockRule, MockVersion } from '../types';
 import { mocksApi, streamAiRequest } from '../api/client';
 import JsonViewer from './JsonViewer';
 
 interface MockEditorProps {
   rule?: MockRule | null;
   initialVersionId?: number;
+  defaultFolderId?: number | null;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -38,11 +39,13 @@ function getBodyError(body: string): string | null {
   }
 }
 
-export default function MockEditor({ rule, initialVersionId, onClose, onSaved }: MockEditorProps) {
+export default function MockEditor({ rule, initialVersionId, defaultFolderId, onClose, onSaved }: MockEditorProps) {
   const [name, setName] = useState(rule?.name || '');
   const [urlPattern, setUrlPattern] = useState(rule?.url_pattern || '');
   const [matchType, setMatchType] = useState<'exact' | 'wildcard' | 'regex'>(rule?.match_type || 'exact');
   const [method, setMethod] = useState(rule?.method || '');
+  const [folderId, setFolderId] = useState<number | null>(rule?.folder_id ?? defaultFolderId ?? null);
+  const [folders, setFolders] = useState<MockFolder[]>([]);
   const [delayMs, setDelayMs] = useState(rule?.delay_ms ?? 0);
   const [condType, setCondType] = useState(rule?.condition_field_type || '');
   const [condKey, setCondKey] = useState(rule?.condition_field_key || '');
@@ -55,6 +58,10 @@ export default function MockEditor({ rule, initialVersionId, onClose, onSaved }:
   const [versionDraft, setVersionDraft] = useState<MockVersionDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    mocksApi.listFolders().then(setFolders).catch(console.error);
+  }, []);
 
   useEffect(() => {
     if (rule?.id) {
@@ -86,7 +93,7 @@ export default function MockEditor({ rule, initialVersionId, onClose, onSaved }:
       if (rule) {
         const tasks: Promise<unknown>[] = [mocksApi.update(rule.id, {
           name, url_pattern: urlPattern, match_type: matchType,
-          method: method || null, delay_ms: delayMs,
+          method: method || null, folder_id: folderId, delay_ms: delayMs,
           condition_field_type: condType || null,
           condition_field_key: condType ? (condKey || null) : null,
           condition_field_value: condType ? (condValue || null) : null,
@@ -107,7 +114,7 @@ export default function MockEditor({ rule, initialVersionId, onClose, onSaved }:
       } else {
         await mocksApi.create({
           name, url_pattern: urlPattern, match_type: matchType,
-          method: method || undefined, delay_ms: delayMs,
+          method: method || undefined, folder_id: folderId, delay_ms: delayMs,
           condition_field_type: condType || undefined,
           condition_field_key: condKey || undefined,
           condition_field_value: condValue || undefined,
@@ -161,6 +168,19 @@ export default function MockEditor({ rule, initialVersionId, onClose, onSaved }:
                 className="input-field w-full text-sm font-mono"
                 placeholder="/api/users/*"
               />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-slate-400 mb-1">Folder</label>
+              <select
+                value={folderId ?? ''}
+                onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
+                className="input-field w-full text-sm"
+              >
+                <option value="">Unfiled</option>
+                {folders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>{folder.name}</option>
+                ))}
+              </select>
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-400 mb-1">Match Type</label>

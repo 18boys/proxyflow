@@ -65,8 +65,11 @@ HOST=0.0.0.0
 # ⚠️ 改成随机强密码，不要使用默认值
 JWT_SECRET=your_super_secure_random_secret_here
 
-# 如需 AI 功能，填入真实 Key
+# 可选：未配置个人 AI 时使用的系统默认 Anthropic
 ANTHROPIC_API_KEY=sk-ant-api03-YOUR_REAL_KEY
+
+# 用于加密用户在个人设置中保存的 AI Key；生产环境请设置独立强随机值
+AI_CREDENTIAL_SECRET=your_ai_credential_encryption_secret
 ```
 
 ### Step 2：创建日志目录

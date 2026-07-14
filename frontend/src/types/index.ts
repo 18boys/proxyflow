@@ -53,9 +53,32 @@ export interface MockVersion {
   updated_at: string;
 }
 
+export interface MockFolder {
+  id: number;
+  user_id: number;
+  name: string;
+  mock_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AiProtocol = 'openai' | 'anthropic';
+
+export interface AiSettings {
+  enabled: boolean;
+  protocol: AiProtocol;
+  endpoint: string;
+  model: string;
+  has_api_key: boolean;
+  effective_source: 'personal' | 'system' | 'none';
+  system_configured: boolean;
+}
+
 export interface MockRule {
   id: number;
   user_id: number;
+  folder_id: number | null;
+  folder_name?: string | null;
   name: string;
   url_pattern: string;
   match_type: 'exact' | 'wildcard' | 'regex';

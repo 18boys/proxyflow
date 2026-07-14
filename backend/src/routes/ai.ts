@@ -1,40 +1,58 @@
 import { Router, Response } from 'express';
-import Anthropic from '@anthropic-ai/sdk';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
+import { getPublicAiSettings, getResolvedAiConfig, streamAiText } from '../aiProvider';
 
 const router = Router();
 
-// Check if API key is configured
-function isApiKeyConfigured(): boolean {
-  return !!process.env.ANTHROPIC_API_KEY && process.env.ANTHROPIC_API_KEY.trim() !== '';
-}
-
-// Return SSE-formatted error when AI is not configured
-function sendAiUnconfiguredError(res: Response): void {
+function setSseHeaders(res: Response): void {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.write(`data: ${JSON.stringify({
-    type: 'error',
-    message: 'AI 功能未配置：请在后端 .env 文件中设置 ANTHROPIC_API_KEY。\n\n示例：\nANTHROPIC_API_KEY=sk-ant-api03-...',
-    code: 'AI_NOT_CONFIGURED',
-  })}\n\n`);
+}
+
+function sendSseError(res: Response, message: string, code?: string): void {
+  setSseHeaders(res);
+  res.write(`data: ${JSON.stringify({ type: 'error', message, code })}\n\n`);
   res.end();
 }
 
-// Lazy-init Anthropic client (only when API key is present)
-function getAnthropicClient(): Anthropic {
-  return new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! });
+async function runAi(
+  userId: number,
+  res: Response,
+  prompt: string,
+  maxTokens: number,
+): Promise<void> {
+  const config = getResolvedAiConfig(userId);
+  if (!config) {
+    sendSseError(
+      res,
+      'AI 功能未配置。请前往个人设置配置自己的 AI，或由管理员设置系统默认 AI。',
+      'AI_NOT_CONFIGURED',
+    );
+    return;
+  }
+
+  setSseHeaders(res);
+  try {
+    const fullText = await streamAiText(config, prompt, maxTokens, (text) => {
+      res.write(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
+    });
+    res.write(`data: ${JSON.stringify({ type: 'done', fullText })}\n\n`);
+    res.end();
+  } catch (error) {
+    res.write(`data: ${JSON.stringify({
+      type: 'error',
+      message: error instanceof Error ? error.message : 'Unknown AI error',
+    })}\n\n`);
+    res.end();
+  }
 }
 
 // POST /api/ai/generate-mock - generate mock scenarios from description
 router.post('/generate-mock', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
-  if (!isApiKeyConfigured()) { sendAiUnconfiguredError(res); return; }
-
   const { description, url, method } = req.body;
-
   if (!description) {
     res.status(400).json({ error: 'description is required' });
     return;
@@ -58,65 +76,24 @@ IMPORTANT: Return ONLY valid JSON, no markdown, no explanation. Format:
     "response_status": 200,
     "response_headers": {"Content-Type": "application/json"},
     "response_body": "{\"data\": {...}}"
-  },
-  ...
+  }
 ]`;
 
-  // Set SSE headers
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  try {
-    const anthropic = getAnthropicClient();
-    const stream = anthropic.messages.stream({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    let fullText = '';
-
-    stream.on('text', (text) => {
-      fullText += text;
-      res.write(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
-    });
-
-    stream.on('finalMessage', () => {
-      res.write(`data: ${JSON.stringify({ type: 'done', fullText })}\n\n`);
-      res.end();
-    });
-
-    stream.on('error', (err) => {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-      res.end();
-    });
-
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
-    res.end();
-  }
+  await runAi(req.userId!, res, prompt, 2000);
 });
 
 // POST /api/ai/diagnose - diagnose anomalous requests
 router.post('/diagnose', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
-  if (!isApiKeyConfigured()) { sendAiUnconfiguredError(res); return; }
-
   const { requestIds } = req.body;
-
   if (!Array.isArray(requestIds) || requestIds.length === 0) {
     res.status(400).json({ error: 'requestIds array is required' });
     return;
   }
 
   const db = getDb();
-  // Match logs by id AND (user_id matches OR user_id is null for anonymous proxy requests)
-  const logs = requestIds.map((id: number) => {
-    const log = db.prepare('SELECT * FROM request_logs WHERE id = ? AND (user_id = ? OR user_id IS NULL)').get(id, req.userId!);
-    return log;
-  }).filter(Boolean) as Record<string, unknown>[];
+  const logs = requestIds.map((id: number) => db.prepare(
+    'SELECT * FROM request_logs WHERE id = ? AND (user_id = ? OR user_id IS NULL)'
+  ).get(id, req.userId!)).filter(Boolean) as Record<string, unknown>[];
 
   if (logs.length === 0) {
     res.status(404).json({ error: 'No request logs found' });
@@ -128,7 +105,9 @@ router.post('/diagnose', requireAuth, async (req: AuthRequest, res: Response): P
     url: log['url'],
     status: log['response_status'],
     duration_ms: log['duration_ms'],
-    request_body: log['request_body'] ? JSON.parse(log['request_body'] as string || '{}') : null,
+    request_body: log['request_body'] ? (() => {
+      try { return JSON.parse(log['request_body'] as string); } catch { return log['request_body']; }
+    })() : null,
     response_body: log['response_body'] ? (() => {
       try { return JSON.parse(log['response_body'] as string); } catch { return log['response_body']; }
     })() : null,
@@ -147,46 +126,12 @@ Please provide:
 
 Be specific, technical, and actionable. Format your response with clear markdown headings.`;
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  try {
-    const anthropic = getAnthropicClient();
-    const stream = anthropic.messages.stream({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 2000,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    stream.on('text', (text) => {
-      res.write(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
-    });
-
-    stream.on('finalMessage', () => {
-      res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-      res.end();
-    });
-
-    stream.on('error', (err) => {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-      res.end();
-    });
-
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
-    res.end();
-  }
+  await runAi(req.userId!, res, prompt, 2000);
 });
 
 // POST /api/ai/generate-json - natural language to JSON
 router.post('/generate-json', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
-  if (!isApiKeyConfigured()) { sendAiUnconfiguredError(res); return; }
-
   const { description, context } = req.body;
-
   if (!description) {
     res.status(400).json({ error: 'description is required' });
     return;
@@ -197,50 +142,20 @@ ${context ? `\nContext about the API: ${context}` : ''}
 
 Return ONLY valid JSON, no explanation, no markdown fences. The JSON should be realistic and complete.`;
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-
-  try {
-    const anthropic = getAnthropicClient();
-    const stream = anthropic.messages.stream({
-      model: 'claude-3-5-sonnet-20241022',
-      max_tokens: 1500,
-      messages: [{ role: 'user', content: prompt }],
-    });
-
-    let fullText = '';
-
-    stream.on('text', (text) => {
-      fullText += text;
-      res.write(`data: ${JSON.stringify({ type: 'chunk', text })}\n\n`);
-    });
-
-    stream.on('finalMessage', () => {
-      res.write(`data: ${JSON.stringify({ type: 'done', fullText })}\n\n`);
-      res.end();
-    });
-
-    stream.on('error', (err) => {
-      res.write(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`);
-      res.end();
-    });
-
-  } catch (err) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
-    res.end();
-  }
+  await runAi(req.userId!, res, prompt, 1500);
 });
 
-// GET /api/ai/status - check if AI is configured
-router.get('/status', requireAuth, (_req, res: Response): void => {
+// GET /api/ai/status - check effective personal/system configuration
+router.get('/status', requireAuth, (req: AuthRequest, res: Response): void => {
+  const settings = getPublicAiSettings(req.userId!);
   res.json({
-    configured: isApiKeyConfigured(),
-    message: isApiKeyConfigured()
+    configured: settings.effective_source !== 'none',
+    source: settings.effective_source,
+    protocol: settings.effective_source === 'personal' ? settings.protocol : 'anthropic',
+    model: settings.effective_source === 'personal' ? settings.model : process.env.ANTHROPIC_MODEL || 'claude-3-5-sonnet-20241022',
+    message: settings.effective_source !== 'none'
       ? 'AI is ready'
-      : 'AI 功能未配置：请在后端 .env 文件中设置 ANTHROPIC_API_KEY',
+      : 'AI 功能未配置，请前往个人设置配置 AI',
   });
 });
 

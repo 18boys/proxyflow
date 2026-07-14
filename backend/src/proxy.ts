@@ -177,14 +177,7 @@ export async function saveRequestLog(data: {
   const lastInsertRowid = result.lastInsertRowid as number;
 
   try {
-    // 1. 删除 1 小时前的数据
-    if (data.userId) {
-      db.prepare(`DELETE FROM request_logs WHERE user_id = ? AND created_at < datetime('now', '+8 hours', '-1 hour')`).run(data.userId);
-    } else {
-      db.prepare(`DELETE FROM request_logs WHERE user_id IS NULL AND created_at < datetime('now', '+8 hours', '-1 hour')`).run();
-    }
-
-    // 2. 每个用户最多保留 100 条请求
+    // 每个用户最多保留 100 条请求，不再按时间清理
     if (data.userId) {
       db.prepare(`
         DELETE FROM request_logs 

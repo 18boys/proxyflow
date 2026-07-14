@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { Bookmark, Check, LogIn, Copy, ChevronRight } from 'lucide-react';
 import { requestsApi, mocksApi } from '../api/client';
 import { useStore } from '../store/useStore';
-import type { SharedRequest } from '../types';
+import type { MockFolder, SharedRequest } from '../types';
 import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from '../components/JsonViewer';
 import { copyToClipboard } from '../utils/clipboard';
@@ -20,6 +20,8 @@ export default function SharedRequestPage() {
   // Save as mock state
   const [showSaveMock, setShowSaveMock] = useState(false);
   const [mockName, setMockName] = useState('');
+  const [mockFolderId, setMockFolderId] = useState<number | null>(null);
+  const [mockFolders, setMockFolders] = useState<MockFolder[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [curlCopied, setCurlCopied] = useState(false);
@@ -32,11 +34,16 @@ export default function SharedRequestPage() {
       .finally(() => setLoading(false));
   }, [token]);
 
+  useEffect(() => {
+    if (!user) return;
+    mocksApi.listFolders().then(setMockFolders).catch(() => setMockFolders([]));
+  }, [user]);
+
   const handleSaveMock = async () => {
     if (!token || !mockName.trim()) return;
     setSaving(true);
     try {
-      await mocksApi.fromShared(token, mockName.trim());
+      await mocksApi.fromShared(token, mockName.trim(), undefined, mockFolderId);
       setSaveSuccess(true);
       setShowSaveMock(false);
       setMockName('');
@@ -144,16 +151,27 @@ export default function SharedRequestPage() {
         {showSaveMock && (
           <div className="mb-4 p-3 bg-slate-800 border border-slate-700 rounded-xl">
             <p className="text-xs font-medium text-slate-200 mb-2">保存为 Mock 规则</p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <input
                 type="text"
                 placeholder="规则名称，例如：Get User API"
                 value={mockName}
                 onChange={(e) => setMockName(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && handleSaveMock()}
-                className="flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
+                className="min-w-56 flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
                 autoFocus
               />
+              <select
+                value={mockFolderId ?? ''}
+                onChange={(event) => setMockFolderId(event.target.value ? Number(event.target.value) : null)}
+                aria-label="Mock 文件夹"
+                className="bg-slate-900 border border-slate-600 text-slate-300 text-xs rounded px-2 py-1.5"
+              >
+                <option value="">未分类</option>
+                {mockFolders.map((folder) => (
+                  <option key={folder.id} value={folder.id}>{folder.name}</option>
+                ))}
+              </select>
               <button
                 onClick={handleSaveMock}
                 disabled={saving || !mockName.trim()}

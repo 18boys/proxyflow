@@ -65,9 +65,18 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     updated_at:        "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },
 
+  mock_folders: {
+    id:         'INTEGER PRIMARY KEY AUTOINCREMENT',
+    user_id:    'INTEGER NOT NULL REFERENCES users(id)',
+    name:       'TEXT NOT NULL',
+    created_at: "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+    updated_at: "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
+
   mock_rules: {
     id:                    'INTEGER PRIMARY KEY AUTOINCREMENT',
     user_id:               'INTEGER NOT NULL REFERENCES users(id)',
+    folder_id:             'INTEGER REFERENCES mock_folders(id) ON DELETE SET NULL',
     name:                  'TEXT NOT NULL',
     url_pattern:           'TEXT NOT NULL',
     match_type:            "TEXT NOT NULL DEFAULT 'exact'",
@@ -99,5 +108,16 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     exclusion_domains:  "TEXT NOT NULL DEFAULT '[]'",
     created_at:         "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
     updated_at:         "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
+
+  user_ai_settings: {
+    user_id:          'INTEGER PRIMARY KEY REFERENCES users(id)',
+    enabled:          'INTEGER NOT NULL DEFAULT 0',
+    protocol:         "TEXT NOT NULL DEFAULT 'openai'",
+    endpoint:         'TEXT NOT NULL',
+    model:            'TEXT NOT NULL',
+    api_key_encrypted:'TEXT',
+    created_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+    updated_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },
 };

@@ -5,9 +5,9 @@ import Layout from './components/Layout';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
 import MocksPage from './pages/MocksPage';
-import RulesPage from './pages/RulesPage';
 import DevicesPage from './pages/DevicesPage';
 import SharedRequestPage from './pages/SharedRequestPage';
+import SettingsPage from './pages/SettingsPage';
 import { authApi } from './api/client';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -54,8 +54,9 @@ export default function App() {
           <Route index element={<Navigate to="/dashboard" replace />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="mocks" element={<MocksPage />} />
-          <Route path="rules" element={<RulesPage />} />
+          <Route path="rules" element={<Navigate to="/mocks" replace />} />
           <Route path="devices" element={<DevicesPage />} />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>

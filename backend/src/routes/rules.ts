@@ -31,10 +31,19 @@ router.post('/global', requireAuth, (req: AuthRequest, res: Response): void => {
   }
 
   const db = getDb();
-  const isActive = mode === 'mock' ? 1 : 0;
-  db.prepare(
-    'UPDATE mock_rules SET is_active = ?, updated_at = datetime(\'now\', \'+8 hours\') WHERE user_id = ?'
-  ).run(isActive, req.userId!);
+  if (mode === 'mock') {
+    db.prepare(`
+      UPDATE mock_rules
+      SET is_active = CASE WHEN active_version_id IS NOT NULL THEN 1 ELSE 0 END,
+          updated_at = datetime('now', '+8 hours')
+      WHERE user_id = ?
+    `).run(req.userId!);
+  } else {
+    db.prepare(`
+      UPDATE mock_rules SET is_active = 0, updated_at = datetime('now', '+8 hours')
+      WHERE user_id = ?
+    `).run(req.userId!);
+  }
 
   res.json({ success: true, mode });
 });
