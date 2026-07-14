@@ -7,6 +7,7 @@ import JsonViewer from './JsonViewer';
 
 interface MockEditorProps {
   rule?: MockRule | null;
+  initialVersionId?: number;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -37,7 +38,7 @@ function getBodyError(body: string): string | null {
   }
 }
 
-export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) {
+export default function MockEditor({ rule, initialVersionId, onClose, onSaved }: MockEditorProps) {
   const [name, setName] = useState(rule?.name || '');
   const [urlPattern, setUrlPattern] = useState(rule?.url_pattern || '');
   const [matchType, setMatchType] = useState<'exact' | 'wildcard' | 'regex'>(rule?.match_type || 'exact');
@@ -59,14 +60,15 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
     if (rule?.id) {
       mocksApi.listVersions(rule.id).then((loadedVersions) => {
         setVersions(loadedVersions);
-        const initialVersion = loadedVersions.find((version) => version.id === rule.active_version_id)
+        const initialVersion = loadedVersions.find((version) => version.id === initialVersionId)
+          ?? loadedVersions.find((version) => version.id === rule.active_version_id)
           ?? loadedVersions[0]
           ?? null;
         setEditingVersion(initialVersion);
         setVersionDraft(initialVersion ? createVersionDraft(initialVersion) : null);
       }).catch(console.error);
     }
-  }, [rule?.active_version_id, rule?.id]);
+  }, [initialVersionId, rule?.active_version_id, rule?.id]);
 
   const editVersion = (version: MockVersion) => {
     setEditingVersion(version);
@@ -84,10 +86,10 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
       if (rule) {
         const tasks: Promise<unknown>[] = [mocksApi.update(rule.id, {
           name, url_pattern: urlPattern, match_type: matchType,
-          method: method || undefined, delay_ms: delayMs,
-          condition_field_type: condType || undefined,
-          condition_field_key: condKey || undefined,
-          condition_field_value: condValue || undefined,
+          method: method || null, delay_ms: delayMs,
+          condition_field_type: condType || null,
+          condition_field_key: condType ? (condKey || null) : null,
+          condition_field_value: condType ? (condValue || null) : null,
         } as Partial<MockRule>)];
         if (selectedVersionId !== rule.active_version_id) {
           tasks.push(mocksApi.update(rule.id, { active_version_id: selectedVersionId } as Partial<MockRule>));
@@ -752,87 +754,4 @@ function MockVersionFields({ draft, onChange, delayMs, onDelayChange }: MockVers
       </div>
     </div>
   );
-}
-
-// ── VersionEditModal ───────────────────────────────────────────────────────
-interface VersionEditModalProps {
-  version: MockVersion;
-  ruleId: number;
-  initialDelayMs: number;
-  onSaved: (v: MockVersion, delayMs: number) => void;
-  onClose: () => void;
-}
-
-export function VersionEditModal({
-  version, ruleId, initialDelayMs, onSaved, onClose,
-}: VersionEditModalProps) {
-  const [draft, setDraft] = useState<MockVersionDraft>(() => createVersionDraft(version));
-  const [delayMs, setDelayMs] = useState(initialDelayMs);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSave = async () => {
-    const bodyError = getBodyError(draft.response_body);
-    if (bodyError) {
-      setError(`Response Body JSON is invalid: ${bodyError}`);
-      return;
-    }
-    setSaving(true);
-    setError(null);
-    try {
-      const [updated] = await Promise.all([
-        mocksApi.updateVersion(ruleId, version.id, draft),
-        delayMs !== initialDelayMs
-          ? mocksApi.update(ruleId, { delay_ms: delayMs } as Partial<MockRule>)
-          : Promise.resolve(),
-      ]);
-      onSaved(updated, delayMs);
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : 'Save failed');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return createPortal((
-    <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-6xl h-[calc(100vh-2rem)] max-h-[1000px] flex flex-col shadow-2xl">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
-          <div>
-            <h3 className="text-base font-semibold text-slate-100">Edit Mock Response</h3>
-            <p className="text-xs text-slate-500 mt-0.5">{version.name}</p>
-          </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-slate-700 text-slate-400">
-            <X size={16} />
-          </button>
-        </div>
-
-        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
-          {error && (
-            <div className="mb-4 flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm">
-              <AlertCircle size={14} /> {error}
-            </div>
-          )}
-          <MockVersionFields
-            draft={draft}
-            onChange={setDraft}
-            delayMs={delayMs}
-            onDelayChange={setDelayMs}
-          />
-        </div>
-
-        <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-800">
-          <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
-          <button
-            onClick={handleSave}
-            disabled={saving || !!getBodyError(draft.response_body)}
-            className="btn-primary text-sm flex items-center gap-2"
-          >
-            {saving && <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />}
-            Save Mock
-          </button>
-        </div>
-      </div>
-    </div>
-  ), document.body);
 }

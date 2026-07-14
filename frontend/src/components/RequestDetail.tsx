@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2 } from 'lucide-react';
 import type { RequestLog, MockRule, MockVersion } from '../types';
 import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
 import { requestsApi, mocksApi } from '../api/client';
-import { VersionEditModal } from './MockEditor';
+import MockEditor from './MockEditor';
 import { copyToClipboard } from '../utils/clipboard';
 
 interface RequestDetailProps {
@@ -342,19 +342,19 @@ function MockTab({ log }: { log: RequestLog }) {
   const [operating, setOperating] = useState<number | null>(null); // versionId being operated
   // local state per rule: { activeVersionId, isActive }
   const [localState, setLocalState] = useState<Record<number, { vid: number | null; active: boolean }>>({});
-  const [editingVersion, setEditingVersion] = useState<{
-    version: MockVersion;
-    ruleId: number;
-    delayMs: number;
+  const [editingMock, setEditingMock] = useState<{
+    rule: MockRule;
+    versionId: number;
   } | null>(null);
   const [deletingVersionId, setDeletingVersionId] = useState<number | null>(null);
 
-  useEffect(() => {
+  const loadMockData = useCallback(async () => {
     setLoading(true);
     setRules([]);
     setVersions({});
     setLocalState({});
-    mocksApi.list().then(async (allRules) => {
+    try {
+      const allRules = await mocksApi.list();
       const matched = allRules.filter((rule) => matchesRule(rule, log));
       setRules(matched);
       const init: Record<number, { vid: number | null; active: boolean }> = {};
@@ -365,8 +365,14 @@ function MockTab({ log }: { log: RequestLog }) {
         versionMap[rule.id] = await mocksApi.listVersions(rule.id);
       }));
       setVersions(versionMap);
-    }).finally(() => setLoading(false));
-  }, [log.id]);
+    } finally {
+      setLoading(false);
+    }
+  }, [log]);
+
+  useEffect(() => {
+    void loadMockData();
+  }, [loadMockData]);
 
   // Apply a version: enable this rule + disable all other matched rules
   const handleApply = async (ruleId: number, versionId: number) => {
@@ -505,12 +511,12 @@ function MockTab({ log }: { log: RequestLog }) {
                       v.response_status >= 400 ? 'text-red-400' : 'text-slate-400'
                     }`}>{v.response_status}</span>
                     <button
-                      onClick={() => setEditingVersion({
-                        version: v,
-                        ruleId: rule.id,
-                        delayMs: rule.delay_ms ?? 0,
+                      onClick={() => setEditingMock({
+                        rule,
+                        versionId: v.id,
                       })}
                       title="Edit mock data"
+                      aria-label={`Edit ${v.name}`}
                       className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors shrink-0 text-[10px]"
                     >
                       <Pencil size={11} /> Edit
@@ -519,6 +525,7 @@ function MockTab({ log }: { log: RequestLog }) {
                       onClick={() => handleDeleteVersion(rule.id, v.id)}
                       disabled={deletingVersionId === v.id}
                       title="Delete version"
+                      aria-label={`Delete ${v.name}`}
                       className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50 text-[10px]"
                     >
                       <Trash2 size={11} /> Delete
@@ -542,26 +549,16 @@ function MockTab({ log }: { log: RequestLog }) {
         );
       })}
 
-      {/* Version edit modal */}
-      {editingVersion && (
-        <VersionEditModal
-          version={editingVersion.version}
-          ruleId={editingVersion.ruleId}
-          initialDelayMs={editingVersion.delayMs}
-          onSaved={(updated, updatedDelayMs) => {
-            setVersions((prev) => ({
-              ...prev,
-              [editingVersion.ruleId]: prev[editingVersion.ruleId]?.map((v) =>
-                v.id === updated.id ? updated : v
-              ) ?? [],
-            }));
-            setRules((prev) => prev.map((rule) => rule.id === editingVersion.ruleId
-              ? { ...rule, delay_ms: updatedDelayMs }
-              : rule
-            ));
-            setEditingVersion(null);
+      {/* Same full editor used by /mocks */}
+      {editingMock && (
+        <MockEditor
+          rule={editingMock.rule}
+          initialVersionId={editingMock.versionId}
+          onSaved={async () => {
+            await loadMockData();
+            setEditingMock(null);
           }}
-          onClose={() => setEditingVersion(null)}
+          onClose={() => setEditingMock(null)}
         />
       )}
     </div>
