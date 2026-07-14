@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy, ChevronRight } from 'lucide-react';
 import type { MockRule, MockVersion } from '../types';
 import { mocksApi, streamAiRequest } from '../api/client';
@@ -8,6 +9,32 @@ interface MockEditorProps {
   rule?: MockRule | null;
   onClose: () => void;
   onSaved: () => void;
+}
+
+interface MockVersionDraft {
+  name: string;
+  response_status: number;
+  response_headers: string;
+  response_body: string;
+}
+
+function createVersionDraft(version: MockVersion): MockVersionDraft {
+  return {
+    name: version.name,
+    response_status: version.response_status,
+    response_headers: version.response_headers || '{}',
+    response_body: version.response_body,
+  };
+}
+
+function getBodyError(body: string): string | null {
+  if (!body.trim()) return null;
+  try {
+    JSON.parse(body);
+    return null;
+  } catch (error) {
+    return (error as Error).message;
+  }
 }
 
 export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) {
@@ -24,15 +51,27 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
   const [versions, setVersions] = useState<MockVersion[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(rule?.active_version_id || null);
   const [editingVersion, setEditingVersion] = useState<MockVersion | null>(null);
-  const [newVersionName, setNewVersionName] = useState('');
+  const [versionDraft, setVersionDraft] = useState<MockVersionDraft | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (rule?.id) {
-      mocksApi.listVersions(rule.id).then(setVersions).catch(console.error);
+      mocksApi.listVersions(rule.id).then((loadedVersions) => {
+        setVersions(loadedVersions);
+        const initialVersion = loadedVersions.find((version) => version.id === rule.active_version_id)
+          ?? loadedVersions[0]
+          ?? null;
+        setEditingVersion(initialVersion);
+        setVersionDraft(initialVersion ? createVersionDraft(initialVersion) : null);
+      }).catch(console.error);
     }
-  }, [rule?.id]);
+  }, [rule?.active_version_id, rule?.id]);
+
+  const editVersion = (version: MockVersion) => {
+    setEditingVersion(version);
+    setVersionDraft(createVersionDraft(version));
+  };
 
   const handleSaveRule = async () => {
     if (!name.trim() || !urlPattern.trim()) {
@@ -43,16 +82,26 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
     setError(null);
     try {
       if (rule) {
-        await mocksApi.update(rule.id, {
+        const tasks: Promise<unknown>[] = [mocksApi.update(rule.id, {
           name, url_pattern: urlPattern, match_type: matchType,
           method: method || undefined, delay_ms: delayMs,
           condition_field_type: condType || undefined,
           condition_field_key: condKey || undefined,
           condition_field_value: condValue || undefined,
-        } as Partial<MockRule>);
+        } as Partial<MockRule>)];
         if (selectedVersionId !== rule.active_version_id) {
-          await mocksApi.update(rule.id, { active_version_id: selectedVersionId } as Partial<MockRule>);
+          tasks.push(mocksApi.update(rule.id, { active_version_id: selectedVersionId } as Partial<MockRule>));
         }
+        if (editingVersion && versionDraft) {
+          const bodyError = getBodyError(versionDraft.response_body);
+          if (bodyError) {
+            setError(`Response Body JSON is invalid: ${bodyError}`);
+            setSaving(false);
+            return;
+          }
+          tasks.push(mocksApi.updateVersion(rule.id, editingVersion.id, versionDraft));
+        }
+        await Promise.all(tasks);
       } else {
         await mocksApi.create({
           name, url_pattern: urlPattern, match_type: matchType,
@@ -70,9 +119,9 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
     }
   };
 
-  return (
+  return createPortal((
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-[1440px] h-[calc(100vh-2rem)] max-h-[1000px] flex flex-col shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
           <h2 className="text-base font-semibold text-slate-100">
@@ -83,7 +132,8 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]">
+          <div className="overflow-y-auto px-6 py-4 space-y-4 border-b lg:border-b-0 lg:border-r border-slate-800">
           {error && (
             <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm">
               <AlertCircle size={14} /> {error}
@@ -135,7 +185,7 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
                 ))}
               </select>
             </div>
-            <div className="col-span-2">
+            {!rule?.id && <div className="col-span-2">
               <div className="flex items-center justify-between gap-3 mb-1">
                 <label htmlFor="mock-delay" className="block text-xs font-medium text-slate-400">
                   Delay Response
@@ -166,7 +216,7 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
               <div className="flex justify-between text-xs text-slate-600 mt-0.5">
                 <span>立即返回</span><span>60 秒</span>
               </div>
-            </div>
+            </div>}
           </div>
 
           {/* Condition mock */}
@@ -210,7 +260,7 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
                     version={v}
                     isActive={selectedVersionId === v.id}
                     onSelect={() => setSelectedVersionId(v.id)}
-                    onEdit={() => setEditingVersion(v)}
+                    onEdit={() => editVersion(v)}
                     onCopy={async () => {
                       const copied = await mocksApi.createVersion(rule.id, {
                         name: `${v.name} Copy`,
@@ -219,26 +269,54 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
                         response_body: v.response_body,
                       });
                       setVersions((prev) => [...prev, copied]);
-                      setEditingVersion(copied);
+                      editVersion(copied);
                     }}
                     onDelete={async () => {
                       if (!confirm(`Delete mock data “${v.name}”?`)) return;
                       await mocksApi.deleteVersion(rule.id, v.id);
                       setVersions((prev) => prev.filter((x) => x.id !== v.id));
                       if (selectedVersionId === v.id) setSelectedVersionId(null);
+                      if (editingVersion?.id === v.id) {
+                        const remaining = versions.filter((version) => version.id !== v.id);
+                        const nextVersion = remaining[0] ?? null;
+                        setEditingVersion(nextVersion);
+                        setVersionDraft(nextVersion ? createVersionDraft(nextVersion) : null);
+                      }
                     }}
                   />
                 ))}
                 <AddVersionRow
                   ruleId={rule.id}
                   onAdded={(v) => {
-                    setVersions([...versions, v]);
+                    setVersions((currentVersions) => [...currentVersions, v]);
                     setSelectedVersionId(v.id);
+                    editVersion(v);
                   }}
                 />
               </div>
             </div>
           )}
+          </div>
+
+          <div className="min-h-0 overflow-y-auto px-6 py-4 bg-slate-950/30">
+            {editingVersion && versionDraft ? (
+              <MockVersionFields
+                key={editingVersion.id}
+                draft={versionDraft}
+                onChange={setVersionDraft}
+                delayMs={delayMs}
+                onDelayChange={setDelayMs}
+              />
+            ) : (
+              <div className="h-full min-h-64 flex items-center justify-center text-center text-slate-500">
+                <div>
+                  <div className="text-3xl mb-3">📄</div>
+                  <p className="text-sm text-slate-400">No mock version selected</p>
+                  <p className="text-xs mt-1">Add a version to edit Response Headers and Response Body here.</p>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}
@@ -250,27 +328,13 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
             className="btn-primary text-sm flex items-center gap-2"
           >
             {saving && <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />}
-            {rule ? 'Save Changes' : 'Create Rule'}
+            {rule ? 'Save Mock' : 'Create Rule'}
           </button>
         </div>
       </div>
 
-      {/* Version edit modal */}
-      {editingVersion && rule && (
-        <VersionEditModal
-          version={editingVersion}
-          ruleId={rule.id}
-          initialDelayMs={delayMs}
-          onSaved={(updated, updatedDelayMs) => {
-            setVersions(versions.map((v) => v.id === updated.id ? updated : v));
-            setDelayMs(updatedDelayMs);
-            setEditingVersion(null);
-          }}
-          onClose={() => setEditingVersion(null)}
-        />
-      )}
     </div>
-  );
+  ), document.body);
 }
 
 function VersionRow({
@@ -448,6 +512,248 @@ function HeadersEditor({ value, onChange }: { value: string; onChange: (v: strin
   );
 }
 
+// ── Shared mock response editor ────────────────────────────────────────────
+interface MockVersionFieldsProps {
+  draft: MockVersionDraft;
+  onChange: (draft: MockVersionDraft) => void;
+  delayMs: number;
+  onDelayChange: (delayMs: number) => void;
+}
+
+function MockVersionFields({ draft, onChange, delayMs, onDelayChange }: MockVersionFieldsProps) {
+  const [headersCollapsed, setHeadersCollapsed] = useState(true);
+  const [bodyView, setBodyView] = useState<'tree' | 'source'>(() => {
+    try {
+      const parsed = JSON.parse(draft.response_body);
+      return parsed !== null && typeof parsed === 'object' ? 'tree' : 'source';
+    } catch {
+      return 'source';
+    }
+  });
+  const [aiDescription, setAiDescription] = useState('');
+  const [aiLoading, setAiLoading] = useState(false);
+  const aiCancelRef = useRef<(() => void) | null>(null);
+  const bodyError = getBodyError(draft.response_body);
+
+  const update = (values: Partial<MockVersionDraft>) => onChange({ ...draft, ...values });
+
+  const handleFormatBody = () => {
+    try {
+      update({ response_body: JSON.stringify(JSON.parse(draft.response_body), null, 2) });
+    } catch {
+      // Invalid JSON stays in source mode so it can be corrected.
+    }
+  };
+
+  const handleAiGenerate = () => {
+    if (!aiDescription.trim()) return;
+    setAiLoading(true);
+    let generated = '';
+    aiCancelRef.current = streamAiRequest(
+      '/ai/generate-json',
+      {
+        description: aiDescription,
+        context: `HTTP ${draft.response_status} response for mock version ${draft.name}`,
+      },
+      (text) => { generated += text; },
+      (fullText) => {
+        const cleanText = (fullText || generated).trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
+        update({ response_body: cleanText });
+        try {
+          const parsed = JSON.parse(cleanText);
+          if (parsed !== null && typeof parsed === 'object') setBodyView('tree');
+        } catch {
+          setBodyView('source');
+        }
+        setAiLoading(false);
+      },
+      (error) => {
+        console.error('AI error:', error);
+        setAiLoading(false);
+      },
+    );
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h3 className="text-sm font-semibold text-slate-200">Mock Response</h3>
+          <p className="text-xs text-slate-500 mt-0.5">Header、响应体和延时在两个入口共用同一编辑器</p>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-3 gap-3">
+        <div className="col-span-2">
+          <label className="block text-xs text-slate-400 mb-1">Version Name</label>
+          <input
+            value={draft.name}
+            onChange={(event) => update({ name: event.target.value })}
+            className="input-field w-full text-sm"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-slate-400 mb-1">Status Code</label>
+          <input
+            type="number"
+            value={draft.response_status}
+            onChange={(event) => update({ response_status: Number(event.target.value) })}
+            className={`input-field w-full text-sm font-mono ${
+              draft.response_status >= 200 && draft.response_status < 300 ? 'text-emerald-400' :
+              draft.response_status >= 400 ? 'text-red-400' : 'text-slate-200'
+            }`}
+          />
+        </div>
+      </div>
+
+      <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/30">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <div>
+            <p className="text-xs font-medium text-slate-400">Delay Response</p>
+            <p className="text-[10px] text-slate-600 mt-0.5">Applies to every version of this mock rule</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <input
+              type="number"
+              min={0}
+              max={60000}
+              step={100}
+              value={delayMs}
+              onChange={(event) => onDelayChange(Math.min(60000, Math.max(0, Number(event.target.value) || 0)))}
+              aria-label="Delay Response"
+              className="input-field w-24 py-1 text-xs text-right font-mono"
+            />
+            <span className="text-xs text-slate-500">ms</span>
+          </div>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={60000}
+          step={1}
+          value={delayMs}
+          onChange={(event) => onDelayChange(Number(event.target.value))}
+          aria-label="Delay Response Slider"
+          className="w-full accent-cyan-500"
+        />
+        <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
+          <span>立即返回</span><span>60 秒</span>
+        </div>
+      </div>
+
+      <div className="border border-slate-700 rounded-lg overflow-hidden bg-slate-800/30">
+        <button
+          type="button"
+          onClick={() => setHeadersCollapsed((value) => !value)}
+          className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-800/70 transition-colors"
+          aria-expanded={!headersCollapsed}
+        >
+          <ChevronRight
+            size={13}
+            className={`text-slate-500 transition-transform ${headersCollapsed ? '' : 'rotate-90'}`}
+          />
+          <span className="text-xs font-medium text-slate-400">Response Headers</span>
+          <span className="ml-auto text-[10px] text-slate-600">
+            {parseHeaders(draft.response_headers).length} 项 · {headersCollapsed ? '点击编辑' : '点击折叠'}
+          </span>
+        </button>
+        {!headersCollapsed && (
+          <div className="border-t border-slate-700 p-3">
+            <HeadersEditor
+              value={draft.response_headers}
+              onChange={(responseHeaders) => update({ response_headers: responseHeaders })}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="min-h-[420px]">
+        <div className="flex items-center justify-between gap-3 mb-2">
+          <label className="text-xs font-medium text-slate-400">Response Body</label>
+          <div className="flex items-center gap-1.5">
+            {bodyError && (
+              <span className="text-xs text-red-400 flex items-center gap-1">
+                <AlertCircle size={11} /> {bodyError.slice(0, 50)}
+              </span>
+            )}
+            <div className="flex rounded-md bg-slate-800 p-0.5">
+              <button
+                type="button"
+                onClick={() => setBodyView('tree')}
+                disabled={!!bodyError}
+                className={`px-2 py-1 text-[10px] rounded transition-colors disabled:opacity-40 ${
+                  bodyView === 'tree' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                JSON Tree
+              </button>
+              <button
+                type="button"
+                onClick={() => setBodyView('source')}
+                className={`px-2 py-1 text-[10px] rounded transition-colors ${
+                  bodyView === 'source' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Source
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleFormatBody}
+              title="Format JSON"
+              className="flex items-center gap-1 text-xs text-slate-500 hover:text-cyan-400 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-700"
+            >
+              <WrapText size={11} /> Format
+            </button>
+          </div>
+        </div>
+        {bodyView === 'tree' && !bodyError ? (
+          <div className="border border-slate-700 rounded-lg bg-slate-800/50 p-3 min-h-[390px]">
+            <JsonViewer data={draft.response_body} maxHeight="50vh" />
+          </div>
+        ) : (
+          <textarea
+            value={draft.response_body}
+            onChange={(event) => update({ response_body: event.target.value })}
+            rows={20}
+            spellCheck={false}
+            aria-label="Response Body Source"
+            className={`w-full min-h-[390px] bg-slate-800 border text-slate-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-1 resize-y ${
+              bodyError ? 'border-red-500/70 focus:ring-red-500' : 'border-slate-700 focus:ring-cyan-500'
+            }`}
+          />
+        )}
+      </div>
+
+      <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/50">
+        <p className="text-xs text-slate-400 mb-2 flex items-center gap-1.5">
+          <Bot size={12} className="text-purple-400" /> AI Generate Body
+        </p>
+        <div className="flex gap-2">
+          <input
+            value={aiDescription}
+            onChange={(event) => setAiDescription(event.target.value)}
+            placeholder="Describe the response you want..."
+            className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
+            onKeyDown={(event) => event.key === 'Enter' && handleAiGenerate()}
+          />
+          <button
+            type="button"
+            onClick={handleAiGenerate}
+            disabled={aiLoading || !aiDescription.trim()}
+            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs rounded disabled:opacity-50 flex items-center gap-1"
+          >
+            {aiLoading ? (
+              <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
+            ) : <Bot size={12} />}
+            Generate
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── VersionEditModal ───────────────────────────────────────────────────────
 interface VersionEditModalProps {
   version: MockVersion;
@@ -460,280 +766,73 @@ interface VersionEditModalProps {
 export function VersionEditModal({
   version, ruleId, initialDelayMs, onSaved, onClose,
 }: VersionEditModalProps) {
-  const [name, setName] = useState(version.name);
-  const [status, setStatus] = useState(version.response_status);
-  const [headers, setHeaders] = useState(version.response_headers || '{}');
-  const [headersCollapsed, setHeadersCollapsed] = useState(true);
-  const [body, setBody] = useState(version.response_body);
-  const [bodyView, setBodyView] = useState<'tree' | 'source'>(() => {
-    try {
-      const parsed = JSON.parse(version.response_body);
-      return parsed !== null && typeof parsed === 'object' ? 'tree' : 'source';
-    } catch {
-      return 'source';
-    }
-  });
+  const [draft, setDraft] = useState<MockVersionDraft>(() => createVersionDraft(version));
   const [delayMs, setDelayMs] = useState(initialDelayMs);
-  const [bodyError, setBodyError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [aiDescription, setAiDescription] = useState('');
-  const [aiLoading, setAiLoading] = useState(false);
-  const aiCancelRef = useRef<(() => void) | null>(null);
-
-  const validateBody = (str: string) => {
-    if (!str.trim()) { setBodyError(null); return true; }
-    try {
-      JSON.parse(str);
-      setBodyError(null);
-      return true;
-    } catch (e) {
-      setBodyError((e as Error).message);
-      return false;
-    }
-  };
-
-  const handleBodyChange = (val: string) => {
-    setBody(val);
-    validateBody(val);
-  };
-
-  const handleFormatBody = () => {
-    try {
-      const formatted = JSON.stringify(JSON.parse(body), null, 2);
-      setBody(formatted);
-      setBodyError(null);
-    } catch {
-      // already invalid, leave as-is
-    }
-  };
+  const [error, setError] = useState<string | null>(null);
 
   const handleSave = async () => {
-    if (bodyError) return;
+    const bodyError = getBodyError(draft.response_body);
+    if (bodyError) {
+      setError(`Response Body JSON is invalid: ${bodyError}`);
+      return;
+    }
     setSaving(true);
+    setError(null);
     try {
       const [updated] = await Promise.all([
-        mocksApi.updateVersion(ruleId, version.id, {
-          name, response_status: status, response_headers: headers, response_body: body,
-        }),
+        mocksApi.updateVersion(ruleId, version.id, draft),
         delayMs !== initialDelayMs
           ? mocksApi.update(ruleId, { delay_ms: delayMs } as Partial<MockRule>)
           : Promise.resolve(),
       ]);
       onSaved(updated, delayMs);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Save failed');
     } finally {
       setSaving(false);
     }
   };
 
-  const handleAiGenerate = () => {
-    if (!aiDescription.trim()) return;
-    setAiLoading(true);
-    let generated = '';
-
-    aiCancelRef.current = streamAiRequest(
-      '/ai/generate-json',
-      { description: aiDescription, context: `HTTP ${status} response for mock version ${name}` },
-      (text) => { generated += text; },
-      (fullText) => {
-        const cleanText = (fullText || generated).trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
-        setBody(cleanText);
-        validateBody(cleanText);
-        try {
-          const parsed = JSON.parse(cleanText);
-          if (parsed !== null && typeof parsed === 'object') setBodyView('tree');
-        } catch {
-          // Invalid generated JSON remains available in source mode for correction.
-        }
-        setAiLoading(false);
-      },
-      (err) => {
-        console.error('AI error:', err);
-        setAiLoading(false);
-      }
-    );
-  };
-
-  return (
-    <div className="fixed inset-0 bg-black/70 z-60 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-4xl h-[calc(100vh-2rem)] max-h-[960px] flex flex-col">
-        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
-          <h3 className="text-sm font-semibold text-slate-200">Edit Version</h3>
+  return createPortal((
+    <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-6xl h-[calc(100vh-2rem)] max-h-[1000px] flex flex-col shadow-2xl">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+          <div>
+            <h3 className="text-base font-semibold text-slate-100">Edit Mock Response</h3>
+            <p className="text-xs text-slate-500 mt-0.5">{version.name}</p>
+          </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-slate-700 text-slate-400">
-            <X size={14} />
+            <X size={16} />
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-          {/* Name + Status */}
-          <div className="grid grid-cols-3 gap-3">
-            <div className="col-span-2">
-              <label className="block text-xs text-slate-400 mb-1">Version Name</label>
-              <input value={name} onChange={(e) => setName(e.target.value)} className="input-field w-full text-sm" />
+        <div className="flex-1 min-h-0 overflow-y-auto px-6 py-5">
+          {error && (
+            <div className="mb-4 flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm">
+              <AlertCircle size={14} /> {error}
             </div>
-            <div>
-              <label className="block text-xs text-slate-400 mb-1">Status Code</label>
-              <input
-                type="number" value={status}
-                onChange={(e) => setStatus(Number(e.target.value))}
-                className={`input-field w-full text-sm font-mono ${
-                  status >= 200 && status < 300 ? 'text-emerald-400' :
-                  status >= 400 ? 'text-red-400' : 'text-slate-200'
-                }`}
-              />
-            </div>
-          </div>
-
-          {/* Rule-level response delay */}
-          <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/30">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <div>
-                <p className="text-xs font-medium text-slate-400">Delay Response</p>
-                <p className="text-[10px] text-slate-600 mt-0.5">Applies to every version of this mock rule</p>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="number"
-                  min={0}
-                  max={60000}
-                  step={100}
-                  value={delayMs}
-                  onChange={(e) => setDelayMs(Math.min(60000, Math.max(0, Number(e.target.value) || 0)))}
-                  aria-label="Delay Response"
-                  className="input-field w-24 py-1 text-xs text-right font-mono"
-                />
-                <span className="text-xs text-slate-500">ms</span>
-              </div>
-            </div>
-            <input
-              type="range"
-              min={0}
-              max={60000}
-              step={1}
-              value={delayMs}
-              onChange={(e) => setDelayMs(Number(e.target.value))}
-              aria-label="Delay Response Slider"
-              className="w-full accent-cyan-500"
-            />
-            <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
-              <span>立即返回</span><span>60 秒</span>
-            </div>
-          </div>
-
-          {/* Response Headers */}
-          <div className="border border-slate-700 rounded-lg overflow-hidden bg-slate-800/30">
-            <button
-              type="button"
-              onClick={() => setHeadersCollapsed((value) => !value)}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-800/70 transition-colors"
-              aria-expanded={!headersCollapsed}
-            >
-              <ChevronRight
-                size={13}
-                className={`text-slate-500 transition-transform ${headersCollapsed ? '' : 'rotate-90'}`}
-              />
-              <span className="text-xs font-medium text-slate-400">Response Headers</span>
-              <span className="ml-auto text-[10px] text-slate-600">
-                {parseHeaders(headers).length} 项 · {headersCollapsed ? '点击编辑' : '点击折叠'}
-              </span>
-            </button>
-            {!headersCollapsed && (
-              <div className="border-t border-slate-700 p-3">
-                <HeadersEditor value={headers} onChange={setHeaders} />
-              </div>
-            )}
-          </div>
-
-          {/* Response Body */}
-          <div className="min-h-[360px]">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <label className="text-xs font-medium text-slate-400">Response Body</label>
-              <div className="flex items-center gap-1.5">
-                {bodyError && (
-                  <span className="text-xs text-red-400 flex items-center gap-1">
-                    <AlertCircle size={11} /> {bodyError.slice(0, 50)}
-                  </span>
-                )}
-                <div className="flex rounded-md bg-slate-800 p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => setBodyView('tree')}
-                    disabled={!!bodyError}
-                    className={`px-2 py-1 text-[10px] rounded transition-colors disabled:opacity-40 ${
-                      bodyView === 'tree' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    JSON Tree
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBodyView('source')}
-                    className={`px-2 py-1 text-[10px] rounded transition-colors ${
-                      bodyView === 'source' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
-                    }`}
-                  >
-                    Source
-                  </button>
-                </div>
-                <button
-                  onClick={handleFormatBody}
-                  title="Format JSON"
-                  className="flex items-center gap-1 text-xs text-slate-500 hover:text-cyan-400 transition-colors px-1.5 py-0.5 rounded hover:bg-slate-700"
-                >
-                  <WrapText size={11} /> Format
-                </button>
-              </div>
-            </div>
-            {bodyView === 'tree' && !bodyError ? (
-              <div className="border border-slate-700 rounded-lg bg-slate-800/50 p-3 min-h-[330px]">
-                <JsonViewer data={body} maxHeight="44vh" />
-              </div>
-            ) : (
-              <textarea
-                value={body}
-                onChange={(e) => handleBodyChange(e.target.value)}
-                rows={16}
-                spellCheck={false}
-                className={`w-full min-h-[330px] bg-slate-800 border text-slate-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-1 resize-y
-                  ${bodyError ? 'border-red-500/70 focus:ring-red-500' : 'border-slate-700 focus:ring-cyan-500'}`}
-              />
-            )}
-          </div>
-
-          {/* AI generate */}
-          <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/50">
-            <p className="text-xs text-slate-400 mb-2 flex items-center gap-1.5">
-              <Bot size={12} className="text-purple-400" /> AI Generate Body
-            </p>
-            <div className="flex gap-2">
-              <input
-                value={aiDescription}
-                onChange={(e) => setAiDescription(e.target.value)}
-                placeholder="Describe the response you want..."
-                className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-purple-500"
-                onKeyDown={(e) => e.key === 'Enter' && handleAiGenerate()}
-              />
-              <button
-                onClick={handleAiGenerate}
-                disabled={aiLoading || !aiDescription.trim()}
-                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 text-white text-xs rounded disabled:opacity-50 flex items-center gap-1"
-              >
-                {aiLoading ? (
-                  <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
-                ) : <Bot size={12} />}
-                Generate
-              </button>
-            </div>
-          </div>
+          )}
+          <MockVersionFields
+            draft={draft}
+            onChange={setDraft}
+            delayMs={delayMs}
+            onDelayChange={setDelayMs}
+          />
         </div>
 
-        <div className="flex justify-end gap-2 px-5 py-3 border-t border-slate-800">
+        <div className="flex justify-end gap-2 px-6 py-4 border-t border-slate-800">
           <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
-          <button onClick={handleSave} disabled={saving || !!bodyError} className="btn-primary text-sm flex items-center gap-2">
+          <button
+            onClick={handleSave}
+            disabled={saving || !!getBodyError(draft.response_body)}
+            className="btn-primary text-sm flex items-center gap-2"
+          >
             {saving && <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />}
-            Save Version
+            Save Mock
           </button>
         </div>
       </div>
     </div>
-  );
+  ), document.body);
 }
