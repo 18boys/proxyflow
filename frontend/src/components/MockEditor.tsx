@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy, ChevronRight } from 'lucide-react';
 import type { MockRule, MockVersion } from '../types';
 import { mocksApi, streamAiRequest } from '../api/client';
+import JsonViewer from './JsonViewer';
 
 interface MockEditorProps {
   rule?: MockRule | null;
@@ -259,8 +260,10 @@ export default function MockEditor({ rule, onClose, onSaved }: MockEditorProps) 
         <VersionEditModal
           version={editingVersion}
           ruleId={rule.id}
-          onSaved={(updated) => {
+          initialDelayMs={delayMs}
+          onSaved={(updated, updatedDelayMs) => {
             setVersions(versions.map((v) => v.id === updated.id ? updated : v));
+            setDelayMs(updatedDelayMs);
             setEditingVersion(null);
           }}
           onClose={() => setEditingVersion(null)}
@@ -449,16 +452,28 @@ function HeadersEditor({ value, onChange }: { value: string; onChange: (v: strin
 interface VersionEditModalProps {
   version: MockVersion;
   ruleId: number;
-  onSaved: (v: MockVersion) => void;
+  initialDelayMs: number;
+  onSaved: (v: MockVersion, delayMs: number) => void;
   onClose: () => void;
 }
 
-export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionEditModalProps) {
+export function VersionEditModal({
+  version, ruleId, initialDelayMs, onSaved, onClose,
+}: VersionEditModalProps) {
   const [name, setName] = useState(version.name);
   const [status, setStatus] = useState(version.response_status);
   const [headers, setHeaders] = useState(version.response_headers || '{}');
   const [headersCollapsed, setHeadersCollapsed] = useState(true);
   const [body, setBody] = useState(version.response_body);
+  const [bodyView, setBodyView] = useState<'tree' | 'source'>(() => {
+    try {
+      const parsed = JSON.parse(version.response_body);
+      return parsed !== null && typeof parsed === 'object' ? 'tree' : 'source';
+    } catch {
+      return 'source';
+    }
+  });
+  const [delayMs, setDelayMs] = useState(initialDelayMs);
   const [bodyError, setBodyError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [aiDescription, setAiDescription] = useState('');
@@ -496,10 +511,15 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
     if (bodyError) return;
     setSaving(true);
     try {
-      const updated = await mocksApi.updateVersion(ruleId, version.id, {
-        name, response_status: status, response_headers: headers, response_body: body,
-      });
-      onSaved(updated);
+      const [updated] = await Promise.all([
+        mocksApi.updateVersion(ruleId, version.id, {
+          name, response_status: status, response_headers: headers, response_body: body,
+        }),
+        delayMs !== initialDelayMs
+          ? mocksApi.update(ruleId, { delay_ms: delayMs } as Partial<MockRule>)
+          : Promise.resolve(),
+      ]);
+      onSaved(updated, delayMs);
     } finally {
       setSaving(false);
     }
@@ -518,6 +538,12 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
         const cleanText = (fullText || generated).trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
         setBody(cleanText);
         validateBody(cleanText);
+        try {
+          const parsed = JSON.parse(cleanText);
+          if (parsed !== null && typeof parsed === 'object') setBodyView('tree');
+        } catch {
+          // Invalid generated JSON remains available in source mode for correction.
+        }
         setAiLoading(false);
       },
       (err) => {
@@ -529,7 +555,7 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
 
   return (
     <div className="fixed inset-0 bg-black/70 z-60 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="bg-slate-900 border border-slate-700 rounded-xl w-full max-w-4xl h-[calc(100vh-2rem)] max-h-[960px] flex flex-col">
         <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
           <h3 className="text-sm font-semibold text-slate-200">Edit Version</h3>
           <button onClick={onClose} className="p-1 rounded hover:bg-slate-700 text-slate-400">
@@ -554,6 +580,42 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
                   status >= 400 ? 'text-red-400' : 'text-slate-200'
                 }`}
               />
+            </div>
+          </div>
+
+          {/* Rule-level response delay */}
+          <div className="border border-slate-700 rounded-lg p-3 bg-slate-800/30">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <div>
+                <p className="text-xs font-medium text-slate-400">Delay Response</p>
+                <p className="text-[10px] text-slate-600 mt-0.5">Applies to every version of this mock rule</p>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="number"
+                  min={0}
+                  max={60000}
+                  step={100}
+                  value={delayMs}
+                  onChange={(e) => setDelayMs(Math.min(60000, Math.max(0, Number(e.target.value) || 0)))}
+                  aria-label="Delay Response"
+                  className="input-field w-24 py-1 text-xs text-right font-mono"
+                />
+                <span className="text-xs text-slate-500">ms</span>
+              </div>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={60000}
+              step={1}
+              value={delayMs}
+              onChange={(e) => setDelayMs(Number(e.target.value))}
+              aria-label="Delay Response Slider"
+              className="w-full accent-cyan-500"
+            />
+            <div className="flex justify-between text-[10px] text-slate-600 mt-0.5">
+              <span>立即返回</span><span>60 秒</span>
             </div>
           </div>
 
@@ -582,15 +644,36 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
           </div>
 
           {/* Response Body */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
+          <div className="min-h-[360px]">
+            <div className="flex items-center justify-between gap-3 mb-2">
               <label className="text-xs font-medium text-slate-400">Response Body</label>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5">
                 {bodyError && (
                   <span className="text-xs text-red-400 flex items-center gap-1">
                     <AlertCircle size={11} /> {bodyError.slice(0, 50)}
                   </span>
                 )}
+                <div className="flex rounded-md bg-slate-800 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setBodyView('tree')}
+                    disabled={!!bodyError}
+                    className={`px-2 py-1 text-[10px] rounded transition-colors disabled:opacity-40 ${
+                      bodyView === 'tree' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    JSON Tree
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBodyView('source')}
+                    className={`px-2 py-1 text-[10px] rounded transition-colors ${
+                      bodyView === 'source' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Source
+                  </button>
+                </div>
                 <button
                   onClick={handleFormatBody}
                   title="Format JSON"
@@ -600,14 +683,20 @@ export function VersionEditModal({ version, ruleId, onSaved, onClose }: VersionE
                 </button>
               </div>
             </div>
-            <textarea
-              value={body}
-              onChange={(e) => handleBodyChange(e.target.value)}
-              rows={12}
-              spellCheck={false}
-              className={`w-full bg-slate-800 border text-slate-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-1 resize-y
-                ${bodyError ? 'border-red-500/70 focus:ring-red-500' : 'border-slate-700 focus:ring-cyan-500'}`}
-            />
+            {bodyView === 'tree' && !bodyError ? (
+              <div className="border border-slate-700 rounded-lg bg-slate-800/50 p-3 min-h-[330px]">
+                <JsonViewer data={body} maxHeight="44vh" />
+              </div>
+            ) : (
+              <textarea
+                value={body}
+                onChange={(e) => handleBodyChange(e.target.value)}
+                rows={16}
+                spellCheck={false}
+                className={`w-full min-h-[330px] bg-slate-800 border text-slate-200 text-xs font-mono rounded-lg px-3 py-2 focus:outline-none focus:ring-1 resize-y
+                  ${bodyError ? 'border-red-500/70 focus:ring-red-500' : 'border-slate-700 focus:ring-cyan-500'}`}
+              />
+            )}
           </div>
 
           {/* AI generate */}

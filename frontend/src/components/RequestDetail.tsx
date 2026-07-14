@@ -342,7 +342,11 @@ function MockTab({ log }: { log: RequestLog }) {
   const [operating, setOperating] = useState<number | null>(null); // versionId being operated
   // local state per rule: { activeVersionId, isActive }
   const [localState, setLocalState] = useState<Record<number, { vid: number | null; active: boolean }>>({});
-  const [editingVersion, setEditingVersion] = useState<{ version: MockVersion; ruleId: number } | null>(null);
+  const [editingVersion, setEditingVersion] = useState<{
+    version: MockVersion;
+    ruleId: number;
+    delayMs: number;
+  } | null>(null);
   const [deletingVersionId, setDeletingVersionId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -501,7 +505,11 @@ function MockTab({ log }: { log: RequestLog }) {
                       v.response_status >= 400 ? 'text-red-400' : 'text-slate-400'
                     }`}>{v.response_status}</span>
                     <button
-                      onClick={() => setEditingVersion({ version: v, ruleId: rule.id })}
+                      onClick={() => setEditingVersion({
+                        version: v,
+                        ruleId: rule.id,
+                        delayMs: rule.delay_ms ?? 0,
+                      })}
                       title="Edit mock data"
                       className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors shrink-0 text-[10px]"
                     >
@@ -539,13 +547,18 @@ function MockTab({ log }: { log: RequestLog }) {
         <VersionEditModal
           version={editingVersion.version}
           ruleId={editingVersion.ruleId}
-          onSaved={(updated) => {
+          initialDelayMs={editingVersion.delayMs}
+          onSaved={(updated, updatedDelayMs) => {
             setVersions((prev) => ({
               ...prev,
               [editingVersion.ruleId]: prev[editingVersion.ruleId]?.map((v) =>
                 v.id === updated.id ? updated : v
               ) ?? [],
             }));
+            setRules((prev) => prev.map((rule) => rule.id === editingVersion.ruleId
+              ? { ...rule, delay_ms: updatedDelayMs }
+              : rule
+            ));
             setEditingVersion(null);
           }}
           onClose={() => setEditingVersion(null)}

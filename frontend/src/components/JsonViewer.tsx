@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ChevronRight } from 'lucide-react';
 import { copyToClipboard } from '../utils/clipboard';
 
 interface JsonViewerProps {
@@ -44,9 +44,11 @@ function JsonNode({ value, path, depth, collapsed, onToggle }: NodeProps) {
       <>
         <button
           onClick={() => onToggle(path)}
-          className="text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer select-none"
+          className="inline-flex items-center text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer select-none"
           title={isCollapsed ? 'Expand' : 'Collapse'}
+          aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${path || 'root'}`}
         >
+          <ChevronRight size={11} className={`mr-0.5 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} />
           {isCollapsed
             ? <>[<span className="text-slate-500 px-0.5">{value.length}</span>]</>
             : '['}
@@ -80,9 +82,11 @@ function JsonNode({ value, path, depth, collapsed, onToggle }: NodeProps) {
       <>
         <button
           onClick={() => onToggle(path)}
-          className="text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer select-none"
+          className="inline-flex items-center text-slate-400 hover:text-cyan-400 transition-colors cursor-pointer select-none"
           title={isCollapsed ? 'Expand' : 'Collapse'}
+          aria-label={`${isCollapsed ? 'Expand' : 'Collapse'} ${path || 'root'}`}
         >
+          <ChevronRight size={11} className={`mr-0.5 transition-transform ${isCollapsed ? '' : 'rotate-90'}`} />
           {isCollapsed
             ? <>{'{'}  <span className="text-slate-500 px-0.5">{entries.length}</span>{'}'}</>
             : '{'}
