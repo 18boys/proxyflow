@@ -93,8 +93,8 @@ export default function SettingsPage() {
   const mcpConfigExample = `{
   "mcpServers": {
     "proxyflow": {
-      "command": "node",
-      "args": ["/absolute/path/to/proxyflow/mcp-server/dist/index.js"],
+      "command": "npx",
+      "args": ["-y", "@proxyflow/mcp-server"],
       "env": {
         "PROXYFLOW_URL": "${window.location.origin}",
         "PROXYFLOW_TOKEN": "${revealedToken ?? 'pf_xxxxxxxxxxxxxxxxxxxxxxxx'}"
