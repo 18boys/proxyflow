@@ -16,6 +16,7 @@ import settingsRouter from './routes/settings';
 import relayRouter from './routes/relay';
 import sharedRouter from './routes/shared';
 import statsRouter from './routes/stats';
+import tokensRouter from './routes/tokens';
 
 const API_PORT = parseInt(process.env.PORT || '9000');
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || '9001');
@@ -53,6 +54,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/relay', relayRouter);
 app.use('/api/shared', sharedRouter);
 app.use('/api/stats', statsRouter);
+app.use('/api/tokens', tokensRouter);
 
 // Health check
 app.get('/health', (_, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

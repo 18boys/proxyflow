@@ -675,4 +675,68 @@ router.post('/from-request', requireAuth, (req: AuthRequest, res: Response): voi
   res.status(201).json(rule);
 });
 
+// POST /api/mocks/upsert - create or update a mock by URL pattern (for MCP tooling)
+router.post('/upsert', requireAuth, (req: AuthRequest, res: Response): void => {
+  const {
+    url_pattern, method, response_status, response_body, response_headers,
+    match_type, name, delay_ms, enabled,
+  } = req.body;
+
+  if (!url_pattern) {
+    res.status(400).json({ error: 'url_pattern is required' });
+    return;
+  }
+
+  let pattern: string;
+  try {
+    pattern = new URL(url_pattern).pathname;
+  } catch {
+    pattern = (url_pattern as string).split('?')[0];
+  }
+
+  const normalizedMethod: string | null = method ? String(method).toUpperCase() : null;
+  const normalizedMatchType = match_type || 'wildcard';
+  const status = Number.isInteger(response_status) ? response_status : 200;
+  const headers = response_headers ? JSON.stringify(response_headers) : '{"Content-Type":"application/json"}';
+  const body = response_body !== undefined ? (typeof response_body === 'string' ? response_body : JSON.stringify(response_body)) : '{}';
+  const isActive = enabled === false ? 0 : 1;
+
+  const db = getDb();
+  const existing = db.prepare(
+    'SELECT * FROM mock_rules WHERE user_id = ? AND url_pattern = ? AND method IS ?'
+  ).get(req.userId!, pattern, normalizedMethod) as Record<string, unknown> | undefined;
+
+  let ruleId: number | bigint;
+
+  if (!existing) {
+    const normalizedDelayMs = parseDelayMs(delay_ms ?? 0);
+    const ruleResult = db.prepare(`
+      INSERT INTO mock_rules (user_id, name, url_pattern, match_type, method, is_active, delay_ms, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+    `).run(req.userId!, name || pattern, pattern, normalizedMatchType, normalizedMethod, isActive, normalizedDelayMs ?? 0);
+    ruleId = ruleResult.lastInsertRowid;
+  } else {
+    ruleId = existing['id'] as number;
+    db.prepare(
+      "UPDATE mock_rules SET is_active = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?"
+    ).run(enabled === undefined ? existing['is_active'] : isActive, ruleId);
+  }
+
+  const versionResult = db.prepare(`
+    INSERT INTO mock_versions (rule_id, user_id, name, response_status, response_headers, response_body, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+  `).run(ruleId, req.userId!, name || '200 OK', status, headers, body);
+
+  db.prepare('UPDATE mock_rules SET active_version_id = ? WHERE id = ?')
+    .run(versionResult.lastInsertRowid, ruleId);
+
+  const rule = db.prepare('SELECT * FROM mock_rules WHERE id = ?').get(ruleId) as Record<string, unknown>;
+  const versions = db.prepare(
+    'SELECT id, name, response_status FROM mock_versions WHERE rule_id = ? ORDER BY created_at ASC'
+  ).all(ruleId);
+  const activeVersion = db.prepare('SELECT * FROM mock_versions WHERE id = ?').get(rule['active_version_id']);
+
+  res.status(existing ? 200 : 201).json({ ...rule, version_count: versions.length, versions, active_version: activeVersion });
+});
+
 export default router;

@@ -4,6 +4,9 @@
   "description": "proxyflow React Native SDK — fetch 请求拦截与 Mock",
   "main": "proxyflow-rn-sdk.js",
   "types": "proxyflow-rn-sdk.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "proxyflow-rn-sdk.js",
     "proxyflow-rn-sdk.d.ts",

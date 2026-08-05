@@ -120,4 +120,15 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     created_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
     updated_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },
+
+  api_tokens: {
+    id:           'INTEGER PRIMARY KEY AUTOINCREMENT',
+    user_id:      'INTEGER NOT NULL REFERENCES users(id)',
+    name:         'TEXT NOT NULL',
+    token_prefix: 'TEXT NOT NULL',
+    token_hash:   'TEXT NOT NULL',
+    last_used_at: 'TEXT',
+    revoked_at:   'TEXT',
+    created_at:   "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
 };

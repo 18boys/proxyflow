@@ -4,6 +4,9 @@
   "description": "proxyflow Mini-Program SDK — 小程序网络请求拦截与 Mock",
   "main": "proxy-mp-sdk.js",
   "types": "proxy-mp-sdk.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "proxy-mp-sdk.js",
     "proxy-mp-sdk.d.ts",

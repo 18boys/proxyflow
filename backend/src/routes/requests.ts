@@ -4,8 +4,64 @@ import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
 import { buildCurl } from '../requestReplay';
 import { createSharedRequest } from '../sharedRequests';
+import { matchUrlPattern } from '../proxy';
 
 const router = Router();
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function tryParseJson(value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  try { return JSON.parse(value); } catch { return value; }
+}
+
+// GET /api/requests/wait - wait for the next request matching a URL pattern (for MCP tooling)
+router.get('/wait', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { url_pattern, method } = req.query as { url_pattern?: string; method?: string };
+  const timeoutMs = Math.min(60_000, Math.max(1000, Number(req.query['timeout_ms']) || 30_000));
+
+  if (!url_pattern) {
+    res.status(400).json({ error: 'url_pattern is required' });
+    return;
+  }
+
+  const db = getDb();
+  const normalizedMethod = method ? method.toUpperCase() : null;
+  const sinceId = (db.prepare(
+    'SELECT COALESCE(MAX(id), 0) AS id FROM request_logs WHERE user_id = ?'
+  ).get(req.userId!) as { id: number }).id;
+
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const logs = db.prepare(
+      'SELECT * FROM request_logs WHERE user_id = ? AND id > ? ORDER BY id ASC'
+    ).all(req.userId!, sinceId) as Record<string, unknown>[];
+
+    const match = logs.find((log) => {
+      if (normalizedMethod && (log['method'] as string).toUpperCase() !== normalizedMethod) return false;
+      return matchUrlPattern(url_pattern, log['url'] as string, 'wildcard');
+    });
+
+    if (match) {
+      res.json({
+        matched: true,
+        request: {
+          ...match,
+          request_body: tryParseJson(match['request_body']),
+          response_body: tryParseJson(match['response_body']),
+        },
+      });
+      return;
+    }
+
+    await sleep(500);
+  }
+
+  res.json({ matched: false });
+});
 
 // GET /api/requests - list with filters
 router.get('/', requireAuth, (req: AuthRequest, res: Response): void => {

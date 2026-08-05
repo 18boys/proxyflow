@@ -97,6 +97,15 @@ export interface MockRule {
   updated_at: string;
 }
 
+export interface ApiToken {
+  id: number;
+  name: string;
+  token_prefix: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
 export type StatusColor = 'green' | 'orange' | 'red' | 'gray';
 
 export function getStatusColor(status: number | null): StatusColor {

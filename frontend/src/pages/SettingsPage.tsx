@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Eye, EyeOff, KeyRound, Save, TestTube2 } from 'lucide-react';
-import { settingsApi } from '../api/client';
-import type { AiProtocol, AiSettings } from '../types';
+import { AlertCircle, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Plus, Save, Terminal, TestTube2, Trash2 } from 'lucide-react';
+import { settingsApi, tokensApi } from '../api/client';
+import type { AiProtocol, AiSettings, ApiToken } from '../types';
 import { useStore } from '../store/useStore';
 
 const DEFAULT_ENDPOINTS: Record<AiProtocol, string> = {
@@ -24,6 +24,14 @@ export default function SettingsPage() {
   const [testing, setTesting] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const [tokens, setTokens] = useState<ApiToken[]>([]);
+  const [tokensLoading, setTokensLoading] = useState(true);
+  const [newTokenName, setNewTokenName] = useState('');
+  const [creatingToken, setCreatingToken] = useState(false);
+  const [revealedToken, setRevealedToken] = useState<string | null>(null);
+  const [tokenMessage, setTokenMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     settingsApi.getAi()
       .then((data) => {
@@ -36,6 +44,64 @@ export default function SettingsPage() {
       .catch((error) => setMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not load AI settings' }))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    tokensApi.list()
+      .then(setTokens)
+      .catch((error) => setTokenMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not load API tokens' }))
+      .finally(() => setTokensLoading(false));
+  }, []);
+
+  const handleCreateToken = async () => {
+    const name = newTokenName.trim();
+    if (!name) return;
+    setCreatingToken(true);
+    setTokenMessage(null);
+    try {
+      const created = await tokensApi.create(name);
+      const { token, ...rest } = created;
+      setTokens((prev) => [rest, ...prev]);
+      setRevealedToken(token);
+      setNewTokenName('');
+      setCopied(false);
+    } catch (error) {
+      setTokenMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not create token' });
+    } finally {
+      setCreatingToken(false);
+    }
+  };
+
+  const handleRevokeToken = async (id: number) => {
+    try {
+      await tokensApi.revoke(id);
+      setTokens((prev) => prev.map((t) => (t.id === id ? { ...t, revoked_at: new Date().toISOString() } : t)));
+    } catch (error) {
+      setTokenMessage({ type: 'error', text: error instanceof Error ? error.message : 'Could not revoke token' });
+    }
+  };
+
+  const handleCopyToken = async (token: string) => {
+    try {
+      await navigator.clipboard.writeText(token);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // clipboard unavailable — user can still select the text manually
+    }
+  };
+
+  const mcpConfigExample = `{
+  "mcpServers": {
+    "proxyflow": {
+      "command": "node",
+      "args": ["/absolute/path/to/proxyflow/mcp-server/dist/index.js"],
+      "env": {
+        "PROXYFLOW_URL": "${window.location.origin}",
+        "PROXYFLOW_TOKEN": "${revealedToken ?? 'pf_xxxxxxxxxxxxxxxxxxxxxxxx'}"
+      }
+    }
+  }
+}`;
 
   const changeProtocol = (nextProtocol: AiProtocol) => {
     const currentDefault = DEFAULT_ENDPOINTS[protocol];
@@ -266,6 +332,108 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+
+        <div className="card overflow-hidden mt-6">
+          <div className="flex items-start justify-between gap-4 p-5 border-b border-slate-800">
+            <div className="flex gap-3">
+              <div className="w-9 h-9 rounded-lg bg-cyan-500/15 text-cyan-400 flex items-center justify-center shrink-0">
+                <Terminal size={17} />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-100">API Tokens (MCP)</h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Generate a token so an MCP-connected AI assistant can create/toggle mocks and wait for real requests on your behalf.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 space-y-4">
+            {revealedToken && (
+              <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 p-3 space-y-2">
+                <p className="text-xs text-emerald-400 font-medium">Token generated — copy it now, it will not be shown again.</p>
+                <div className="flex items-center gap-2">
+                  <code className="flex-1 text-xs font-mono text-slate-200 bg-slate-900/60 rounded px-2 py-1.5 break-all">{revealedToken}</code>
+                  <button
+                    onClick={() => handleCopyToken(revealedToken)}
+                    className="btn-secondary text-xs flex items-center gap-1 shrink-0"
+                  >
+                    {copied ? <CheckCircle2 size={13} /> : <Copy size={13} />}
+                    {copied ? 'Copied' : 'Copy'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {tokenMessage && (
+              <div className={`flex items-start gap-2 rounded-lg border px-3 py-2.5 text-xs ${
+                tokenMessage.type === 'success'
+                  ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400'
+                  : 'border-red-500/20 bg-red-500/10 text-red-400'
+              }`}>
+                {tokenMessage.type === 'success' ? <CheckCircle2 size={14} className="shrink-0" /> : <AlertCircle size={14} className="shrink-0" />}
+                <span className="break-all">{tokenMessage.text}</span>
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <input
+                value={newTokenName}
+                onChange={(event) => setNewTokenName(event.target.value)}
+                onKeyDown={(event) => { if (event.key === 'Enter') handleCreateToken(); }}
+                placeholder="Token name, e.g. laptop-mcp"
+                className="input-field flex-1 text-sm"
+              />
+              <button
+                onClick={handleCreateToken}
+                disabled={creatingToken || !newTokenName.trim()}
+                className="btn-primary text-sm flex items-center gap-1.5 disabled:opacity-50 shrink-0"
+              >
+                {creatingToken ? <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" /> : <Plus size={14} />}
+                Generate Token
+              </button>
+            </div>
+
+            {tokensLoading ? (
+              <div className="h-16 flex items-center justify-center">
+                <div className="w-5 h-5 border-2 border-cyan-500/30 border-t-cyan-500 rounded-full animate-spin" />
+              </div>
+            ) : tokens.length === 0 ? (
+              <p className="text-xs text-slate-500">No tokens yet.</p>
+            ) : (
+              <div className="divide-y divide-slate-800 rounded-lg border border-slate-800">
+                {tokens.map((token) => (
+                  <div key={token.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
+                    <div className="min-w-0">
+                      <p className="text-sm text-slate-200 truncate">{token.name}</p>
+                      <p className="text-[11px] text-slate-500 font-mono">{token.token_prefix}••••••••</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        Created {new Date(token.created_at).toLocaleString()}
+                        {token.last_used_at && ` · Last used ${new Date(token.last_used_at).toLocaleString()}`}
+                      </p>
+                    </div>
+                    {token.revoked_at ? (
+                      <span className="text-[11px] text-slate-600 shrink-0">Revoked</span>
+                    ) : (
+                      <button
+                        onClick={() => handleRevokeToken(token.id)}
+                        aria-label="Revoke token"
+                        className="text-slate-500 hover:text-red-400 shrink-0"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+              <p className="text-[11px] text-slate-500 mb-1.5">MCP client configuration:</p>
+              <pre className="text-[11px] font-mono text-slate-400 overflow-x-auto whitespace-pre">{mcpConfigExample}</pre>
+            </div>
+          </div>
         </div>
       </div>
     </div>

@@ -1,0 +1,38 @@
+{
+  "name": "@proxyflow/mcp-server",
+  "version": "1.0.0",
+  "description": "proxyflow MCP server — 让 AI 助手在开发新接口时自行 mock/切换/等待请求",
+  "main": "dist/index.js",
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "proxyflow-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "proxyflow",
+    "mcp",
+    "mock"
+  ],
+  "author": "shibazijiang <shibazijiang@gmail.com>",
+  "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4",
+    "@types/node": "^20.14.0"
+  }
+}

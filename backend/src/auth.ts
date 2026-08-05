@@ -1,10 +1,12 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import { Request, Response, NextFunction } from 'express';
 import { getDb } from './db';
 
 const SECRET_KEY = process.env.JWT_SECRET || 'proxyflow-secret-key-change-in-production-2024';
 const TOKEN_EXPIRY = '30d';
+const API_TOKEN_PREFIX = 'pf_';
 
 export interface JwtPayload {
   sub: string;  // user id as string
@@ -37,6 +39,44 @@ export function decodeToken(token: string): JwtPayload | null {
   }
 }
 
+export function generateApiToken(): string {
+  return API_TOKEN_PREFIX + crypto.randomBytes(24).toString('base64url');
+}
+
+export function hashApiToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+export function verifyApiToken(token: string): { id: number; email: string } | null {
+  if (!token.startsWith(API_TOKEN_PREFIX)) return null;
+
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT u.id, u.email, t.id AS token_id
+    FROM api_tokens t
+    JOIN users u ON u.id = t.user_id
+    WHERE t.token_hash = ? AND t.revoked_at IS NULL
+  `).get(hashApiToken(token)) as { id: number; email: string; token_id: number } | undefined;
+
+  if (!row) return null;
+
+  db.prepare(
+    "UPDATE api_tokens SET last_used_at = datetime('now', '+8 hours') WHERE id = ?"
+  ).run(row.token_id);
+
+  return { id: row.id, email: row.email };
+}
+
+function resolveUser(token: string): { id: number; email: string } | null {
+  const payload = decodeToken(token);
+  if (payload) {
+    const db = getDb();
+    const user = db.prepare('SELECT id, email FROM users WHERE id = ?').get(Number(payload.sub)) as { id: number; email: string } | undefined;
+    return user || null;
+  }
+  return verifyApiToken(token);
+}
+
 export function requireAuth(req: AuthRequest, res: Response, next: NextFunction): void {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -44,17 +84,9 @@ export function requireAuth(req: AuthRequest, res: Response, next: NextFunction)
     return;
   }
 
-  const token = authHeader.slice(7);
-  const payload = decodeToken(token);
-  if (!payload) {
-    res.status(401).json({ error: 'Invalid token' });
-    return;
-  }
-
-  const db = getDb();
-  const user = db.prepare('SELECT id, email FROM users WHERE id = ?').get(Number(payload.sub)) as { id: number; email: string } | undefined;
+  const user = resolveUser(authHeader.slice(7));
   if (!user) {
-    res.status(401).json({ error: 'User not found' });
+    res.status(401).json({ error: 'Invalid token' });
     return;
   }
 
@@ -70,11 +102,10 @@ export function optionalAuth(req: AuthRequest, res: Response, next: NextFunction
     return;
   }
 
-  const token = authHeader.slice(7);
-  const payload = decodeToken(token);
-  if (payload) {
-    req.userId = Number(payload.sub);
-    req.userEmail = payload.email;
+  const user = resolveUser(authHeader.slice(7));
+  if (user) {
+    req.userId = user.id;
+    req.userEmail = user.email;
   }
   next();
 }

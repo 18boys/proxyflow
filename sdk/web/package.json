@@ -4,6 +4,9 @@
   "description": "proxyflow Web SDK — 浏览器 fetch 请求拦截与 Mock",
   "main": "proxyflow-web-sdk.js",
   "types": "proxyflow-web-sdk.d.ts",
+  "publishConfig": {
+    "access": "public"
+  },
   "files": [
     "proxyflow-web-sdk.js",
     "proxyflow-web-sdk.d.ts",

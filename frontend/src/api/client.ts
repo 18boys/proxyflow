@@ -254,6 +254,14 @@ export function streamAiRequest(
   return () => controller.abort();
 }
 
+// ── API Tokens (MCP) ────────────────────────────────────────────────────────
+export const tokensApi = {
+  list: () => get<import('../types').ApiToken[]>('/tokens'),
+  create: (name: string) =>
+    post<import('../types').ApiToken & { token: string }>('/tokens', { name }),
+  revoke: (id: number) => del<{ success: boolean }>(`/tokens/${id}`),
+};
+
 // ── Settings ──────────────────────────────────────────────────────────────
 export const settingsApi = {
   get: () => get<{ exclusion_domains: string[] }>('/settings'),
