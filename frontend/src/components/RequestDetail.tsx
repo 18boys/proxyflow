@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2 } from 'lucide-react';
+import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2, RotateCw, Send, Plus, AlertCircle, WrapText } from 'lucide-react';
 import type { MockFolder, RequestLog, MockRule, MockVersion } from '../types';
 import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
@@ -55,6 +55,26 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
       }
     } catch {
       // ignore
+    }
+  };
+
+  const [replaying, setReplaying] = useState(false);
+  const [replayMsg, setReplayMsg] = useState<string | null>(null);
+  const [showEditSend, setShowEditSend] = useState(false);
+
+  const handleReplay = async () => {
+    if (!log) return;
+    setReplaying(true);
+    setReplayMsg(null);
+    try {
+      const res = await requestsApi.replay(log.id);
+      setReplayMsg(`Replayed: ${res.statusCode} (${res.durationMs}ms)`);
+      setTimeout(() => setReplayMsg(null), 3000);
+    } catch (err) {
+      setReplayMsg(`Replay failed: ${err instanceof Error ? err.message : 'Error'}`);
+      setTimeout(() => setReplayMsg(null), 4000);
+    } finally {
+      setReplaying(false);
     }
   };
 
@@ -158,7 +178,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
     <div className="flex flex-col h-full">
       {/* Header bar */}
       <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/50">
-        <div className="flex items-center gap-2 mb-2">
+        <div className="flex flex-wrap items-center gap-2 mb-2">
           <span className={`px-2 py-0.5 rounded text-xs font-bold font-mono ${methodColor}`}>
             {log.method}
           </span>
@@ -176,11 +196,35 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
             </span>
           )}
           <div className="flex-1" />
+          {replayMsg && (
+            <span className="text-xs text-cyan-400 font-mono animate-fade-in">
+              {replayMsg}
+            </span>
+          )}
           {saveSuccess && (
             <span className="text-xs text-emerald-400 flex items-center gap-1">
               <Check size={12} /> Saved!
             </span>
           )}
+          <button
+            onClick={handleReplay}
+            disabled={replaying}
+            title="Re-execute this exact request"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-400 text-xs font-medium transition-colors disabled:opacity-50"
+          >
+            {replaying ? (
+              <span className="w-3 h-3 border border-current border-t-transparent rounded-full animate-spin" />
+            ) : <RotateCw size={12} />}
+            Replay
+          </button>
+          <button
+            onClick={() => setShowEditSend(true)}
+            title="Edit request parameters and send"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-400 text-xs font-medium transition-colors"
+          >
+            <Send size={12} />
+            Edit & Send
+          </button>
           <button
             onClick={() => setShowSaveMock(true)}
             className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs transition-colors"
@@ -319,6 +363,14 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
           <MockTab log={log} />
         )}
       </div>
+
+      {/* Edit & Send modal */}
+      {showEditSend && log && (
+        <EditSendModal
+          initialLog={log}
+          onClose={() => setShowEditSend(false)}
+        />
+      )}
     </div>
   );
 }
@@ -578,6 +630,227 @@ function MockTab({ log }: { log: RequestLog }) {
           onClose={() => setEditingMock(null)}
         />
       )}
+    </div>
+  );
+}
+
+interface EditSendModalProps {
+  initialLog: RequestLog;
+  onClose: () => void;
+}
+
+function EditSendModal({ initialLog, onClose }: EditSendModalProps) {
+  const [method, setMethod] = useState(initialLog.method || 'GET');
+  const [url, setUrl] = useState(initialLog.url || '');
+  const [headers, setHeaders] = useState<Array<{ key: string; value: string }>>(() => {
+    try {
+      const parsed = typeof initialLog.request_headers === 'string'
+        ? JSON.parse(initialLog.request_headers || '{}')
+        : initialLog.request_headers || {};
+      return Object.entries(parsed).map(([key, value]) => ({ key, value: String(value) }));
+    } catch {
+      return [];
+    }
+  });
+  const [body, setBody] = useState(initialLog.request_body || '');
+  const [sending, setSending] = useState(false);
+  const [responseResult, setResponseResult] = useState<{
+    statusCode: number;
+    headers: Record<string, string>;
+    body: string;
+    durationMs: number;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSend = async () => {
+    if (!url.trim()) {
+      setError('URL is required');
+      return;
+    }
+    setSending(true);
+    setError(null);
+    try {
+      const headerObj: Record<string, string> = {};
+      headers.forEach(({ key, value }) => {
+        if (key.trim()) headerObj[key.trim()] = value;
+      });
+
+      const res = await requestsApi.sendCustom({
+        url: url.trim(),
+        method,
+        headers: headerObj,
+        body: body || null,
+      });
+
+      setResponseResult({
+        statusCode: res.statusCode,
+        headers: res.headers,
+        body: res.body,
+        durationMs: res.durationMs,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Request failed');
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleFormatJson = () => {
+    try {
+      setBody(JSON.stringify(JSON.parse(body), null, 2));
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/80">
+          <div className="flex items-center gap-2">
+            <Send size={16} className="text-cyan-400" />
+            <h3 className="text-sm font-semibold text-slate-100">Edit & Send Request (编辑并发送请求)</h3>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200">
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-xs">
+              <AlertCircle size={14} className="shrink-0" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {/* URL & Method */}
+          <div className="flex gap-2">
+            <select
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+              className="input-field text-xs font-bold font-mono w-28 shrink-0"
+            >
+              {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+            <input
+              type="text"
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="https://api.example.com/endpoint"
+              className="input-field flex-1 text-xs font-mono"
+            />
+            <button
+              onClick={handleSend}
+              disabled={sending}
+              className="btn-primary text-xs flex items-center gap-1.5 px-4 shrink-0"
+            >
+              {sending ? (
+                <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
+              ) : <Send size={13} />}
+              Send
+            </button>
+          </div>
+
+          {/* Headers */}
+          <div className="border border-slate-800 rounded-xl p-3 bg-slate-950/40 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-medium text-slate-300">Request Headers</span>
+              <button
+                type="button"
+                onClick={() => setHeaders([...headers, { key: '', value: '' }])}
+                className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center gap-1"
+              >
+                <Plus size={11} /> Add Header
+              </button>
+            </div>
+            {headers.map((h, idx) => (
+              <div key={idx} className="flex gap-2 items-center">
+                <input
+                  value={h.key}
+                  onChange={(e) => {
+                    const next = [...headers];
+                    next[idx].key = e.target.value;
+                    setHeaders(next);
+                  }}
+                  placeholder="Header key"
+                  className="input-field flex-1 text-xs font-mono py-1"
+                />
+                <span className="text-slate-600">:</span>
+                <input
+                  value={h.value}
+                  onChange={(e) => {
+                    const next = [...headers];
+                    next[idx].value = e.target.value;
+                    setHeaders(next);
+                  }}
+                  placeholder="Header value"
+                  className="input-field flex-[2] text-xs font-mono py-1"
+                />
+                <button
+                  type="button"
+                  onClick={() => setHeaders(headers.filter((_, i) => i !== idx))}
+                  className="p-1 text-slate-500 hover:text-red-400"
+                >
+                  <Trash2 size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Request Body */}
+          {method !== 'GET' && method !== 'HEAD' && (
+            <div className="border border-slate-800 rounded-xl p-3 bg-slate-950/40 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-slate-300">Request Body</span>
+                <button
+                  type="button"
+                  onClick={handleFormatJson}
+                  className="text-[11px] text-slate-400 hover:text-cyan-300 flex items-center gap-1"
+                >
+                  <WrapText size={11} /> Format JSON
+                </button>
+              </div>
+              <textarea
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                rows={5}
+                placeholder="Request payload (JSON, text, etc.)..."
+                className="input-field w-full text-xs font-mono resize-y"
+              />
+            </div>
+          )}
+
+          {/* Live Response Panel */}
+          {responseResult && (
+            <div className="border border-cyan-500/30 rounded-xl p-4 bg-slate-950/60 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-200">Response Result</span>
+                  <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded border ${
+                    responseResult.statusCode >= 200 && responseResult.statusCode < 300 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30' :
+                    responseResult.statusCode >= 400 ? 'text-red-400 bg-red-500/10 border-red-500/30' : 'text-slate-300 bg-slate-700/50'
+                  }`}>
+                    {responseResult.statusCode}
+                  </span>
+                  <span className="text-xs text-slate-400 font-mono">
+                    {responseResult.durationMs}ms
+                  </span>
+                </div>
+              </div>
+
+              {/* Response body */}
+              <div className="max-h-60 overflow-y-auto border border-slate-800 rounded-lg p-2 bg-slate-900">
+                <JsonViewer data={responseResult.body} maxHeight="200px" />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

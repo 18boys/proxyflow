@@ -2,9 +2,10 @@ import { Router, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
-import { buildCurl } from '../requestReplay';
+import { buildCurl, executeReplayRequest } from '../requestReplay';
 import { createSharedRequest } from '../sharedRequests';
-import { matchUrlPattern } from '../proxy';
+import { matchUrlPattern, saveRequestLog } from '../proxy';
+import { wsManager } from '../websocket';
 
 const router = Router();
 
@@ -187,6 +188,114 @@ router.post('/:id/share', requireAuth, (req: AuthRequest, res: Response): void =
   saveShare();
 
   res.json({ share_token: shareToken });
+});
+
+// POST /api/requests/:id/replay - re-execute request and record new log
+router.post('/:id/replay', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  const db = getDb();
+  const log = db.prepare(
+    'SELECT * FROM request_logs WHERE id = ? AND user_id = ?'
+  ).get(Number(req.params['id']), req.userId!) as Record<string, unknown> | undefined;
+
+  if (!log) {
+    res.status(404).json({ error: 'Request not found' });
+    return;
+  }
+
+  const url = String(log['url'] || '');
+  const method = String(log['method'] || 'GET');
+  let headers: Record<string, string> = {};
+  try {
+    const rawHeaders = log['request_headers'];
+    headers = typeof rawHeaders === 'string' ? JSON.parse(rawHeaders || '{}') : (rawHeaders || {});
+  } catch {
+    headers = {};
+  }
+  const body = (log['request_body'] as string) || null;
+
+  try {
+    const result = await executeReplayRequest(url, method, headers, body);
+    const logId = await saveRequestLog({
+      userId: req.userId!,
+      sessionId: (log['session_id'] as string) || null,
+      method,
+      url,
+      requestHeaders: headers,
+      requestBody: body,
+      responseStatus: result.statusCode,
+      responseHeaders: result.headers,
+      responseBody: result.body,
+      durationMs: result.durationMs,
+      isMocked: false,
+      mockId: null,
+    });
+
+    const newLog = db.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
+    await wsManager.broadcastToUser(req.userId!, { type: 'new_request', log: newLog });
+
+    res.json({
+      success: true,
+      log: newLog,
+      statusCode: result.statusCode,
+      headers: result.headers,
+      body: result.body,
+      durationMs: result.durationMs,
+    });
+  } catch (err) {
+    res.status(502).json({
+      error: err instanceof Error ? err.message : 'Replay failed',
+    });
+  }
+});
+
+// POST /api/requests/send-custom - send customized request
+router.post('/send-custom', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  const { url, method = 'GET', headers = {}, body = null } = req.body as {
+    url?: string;
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string | null;
+  };
+
+  if (!url) {
+    res.status(400).json({ error: 'url is required' });
+    return;
+  }
+
+  try {
+    const result = await executeReplayRequest(url, method, headers, body);
+    const logId = await saveRequestLog({
+      userId: req.userId!,
+      sessionId: null,
+      method: method.toUpperCase(),
+      url,
+      requestHeaders: headers,
+      requestBody: body,
+      responseStatus: result.statusCode,
+      responseHeaders: result.headers,
+      responseBody: result.body,
+      durationMs: result.durationMs,
+      isMocked: false,
+      mockId: null,
+    });
+
+    const db = getDb();
+    const newLog = db.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
+    await wsManager.broadcastToUser(req.userId!, { type: 'new_request', log: newLog });
+
+    res.json({
+      success: true,
+      log: newLog,
+      statusCode: result.statusCode,
+      headers: result.headers,
+      body: result.body,
+      durationMs: result.durationMs,
+    });
+  } catch (err) {
+    res.status(502).json({
+      error: err instanceof Error ? err.message : 'Custom send failed',
+    });
+  }
 });
 
 export default router;

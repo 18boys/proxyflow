@@ -1,7 +1,7 @@
 import { useStore } from '../store/useStore';
 import { getStatusColor, getMethodColor } from '../types';
 import type { RequestLog } from '../types';
-import { Trash2, Filter, X, CheckSquare, Square } from 'lucide-react';
+import { Trash2, Filter, X, CheckSquare, Square, Search, RefreshCw, Zap } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { requestsApi } from '../api/client';
 
@@ -9,12 +9,13 @@ interface RequestListProps {
   onSelectRequest: (id: number) => void;
 }
 
-const METHOD_OPTIONS = ['', 'GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-const STATUS_OPTIONS = [
-  { label: 'All', value: '' },
-  { label: '2xx', value: '2xx' },
-  { label: '4xx', value: '4xx' },
-  { label: '5xx', value: '5xx' },
+const METHOD_CHIPS = ['ALL', 'GET', 'POST', 'PUT', 'DELETE'];
+const STATUS_CHIPS = [
+  { label: 'ALL', value: '' },
+  { label: '2xx', value: '2xx', color: 'text-emerald-400' },
+  { label: '4xx', value: '4xx', color: 'text-amber-400' },
+  { label: '5xx', value: '5xx', color: 'text-red-400' },
+  { label: 'MOCKED', value: 'mock', color: 'text-cyan-400' },
 ];
 
 export default function RequestList({ onSelectRequest }: RequestListProps) {
@@ -22,27 +23,35 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
     requests, selectedRequestId, filters, setFilter, clearFilters,
     selectedForDiagnosis, toggleDiagnosisSelection, devices
   } = useStore();
-  const [showFilters, setShowFilters] = useState(false);
   const [clearLoading, setClearLoading] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const setRequests = useStore((s) => s.setRequests);
   const setDevices = useStore((s) => s.setDevices);
 
   useEffect(() => {
-    // 确保组件挂载时加载设备列表，让下拉框有数据
     import('../api/client').then(({ devicesApi }) => {
       devicesApi.list().then(setDevices).catch(() => {});
     });
   }, [setDevices]);
 
   const filteredRequests = requests.filter((req) => {
-    if (filters.url && !req.url.toLowerCase().includes(filters.url.toLowerCase())) return false;
-    if (filters.method && req.method !== filters.method) return false;
+    if (filters.url) {
+      const q = filters.url.toLowerCase();
+      const urlMatches = req.url.toLowerCase().includes(q);
+      const bodyMatches = req.request_body && req.request_body.toLowerCase().includes(q);
+      if (!urlMatches && !bodyMatches) return false;
+    }
+    if (filters.method && req.method.toUpperCase() !== filters.method.toUpperCase()) return false;
     if (filters.status) {
-      const status = req.response_status;
-      if (filters.status === '2xx' && !(status && status >= 200 && status < 300)) return false;
-      if (filters.status === '4xx' && !(status && status >= 400 && status < 500)) return false;
-      if (filters.status === '5xx' && !(status && status >= 500)) return false;
-      if (!isNaN(Number(filters.status)) && status !== Number(filters.status)) return false;
+      if (filters.status === 'mock') {
+        if (req.is_mocked !== 1) return false;
+      } else {
+        const status = req.response_status;
+        if (filters.status === '2xx' && !(status && status >= 200 && status < 300)) return false;
+        if (filters.status === '4xx' && !(status && status >= 400 && status < 500)) return false;
+        if (filters.status === '5xx' && !(status && status >= 500)) return false;
+        if (!isNaN(Number(filters.status)) && status !== Number(filters.status)) return false;
+      }
     }
     if (filters.sessionId && req.session_id !== filters.sessionId) return false;
     return true;
@@ -51,6 +60,7 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
   const hasActiveFilters = Object.values(filters).some(Boolean);
 
   const handleClear = async () => {
+    if (!confirm('Clear all captured request logs?')) return;
     setClearLoading(true);
     try {
       await requestsApi.clear();
@@ -62,93 +72,139 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
 
   return (
     <div className="flex flex-col h-full bg-slate-900/30">
-      {/* Header */}
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b border-slate-800">
-        <button
-          onClick={() => setShowFilters(!showFilters)}
-          className={`p-1.5 rounded hover:bg-slate-700 transition-colors ${hasActiveFilters ? 'text-cyan-400' : 'text-slate-400'}`}
-          title="Filter"
-        >
-          <Filter size={14} />
-        </button>
-        {hasActiveFilters && (
-          <button
-            onClick={clearFilters}
-            className="p-1.5 rounded hover:bg-slate-700 transition-colors text-slate-400"
-            title="Clear filters"
-          >
-            <X size={14} />
-          </button>
-        )}
-        <button
-          onClick={handleClear}
-          disabled={clearLoading}
-          className="p-1.5 rounded hover:bg-slate-700 transition-colors text-slate-400 hover:text-red-400"
-          title="Clear all"
-        >
-          <Trash2 size={14} />
-        </button>
-        <div className="flex-1" />
-        <span className="text-xs font-medium text-slate-400">
-          {filteredRequests.length} requests
-        </span>
-      </div>
-
-      {/* Filters panel */}
-      {showFilters && (
-        <div className="px-3 py-2 border-b border-slate-800 bg-slate-900/50 space-y-2">
-          <input
-            type="text"
-            placeholder="Filter by URL..."
-            value={filters.url}
-            onChange={(e) => setFilter('url', e.target.value)}
-            className="w-full bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
-          />
-          <div className="flex gap-2">
-            <select
-              value={filters.method}
-              onChange={(e) => setFilter('method', e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            >
-              <option value="">All Methods</option>
-              {METHOD_OPTIONS.filter(Boolean).map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-            <select
-              value={filters.status}
-              onChange={(e) => setFilter('status', e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            >
-              {STATUS_OPTIONS.map((s) => (
-                <option key={s.value} value={s.value}>{s.label}</option>
-              ))}
-            </select>
+      {/* Top Search & Filter Bar */}
+      <div className="p-3 border-b border-slate-800 space-y-2 bg-slate-900/60">
+        {/* Search input & actions */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search URL, path or body..."
+              value={filters.url}
+              onChange={(e) => setFilter('url', e.target.value)}
+              className="w-full bg-slate-800/90 border border-slate-700 text-slate-200 text-xs rounded-lg pl-8 pr-7 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-500"
+            />
+            {filters.url && (
+              <button
+                onClick={() => setFilter('url', '')}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+              >
+                <X size={12} />
+              </button>
+            )}
           </div>
-          <div className="flex gap-2">
+
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            className={`p-1.5 rounded-lg border transition-colors ${
+              showAdvanced || filters.sessionId
+                ? 'bg-cyan-500/20 border-cyan-500/40 text-cyan-400'
+                : 'bg-slate-800 border-slate-700 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+            }`}
+            title="More filters"
+          >
+            <Filter size={13} />
+          </button>
+
+          {hasActiveFilters && (
+            <button
+              onClick={clearFilters}
+              className="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 text-xs transition-colors"
+              title="Reset all filters"
+            >
+              Reset
+            </button>
+          )}
+
+          <button
+            onClick={handleClear}
+            disabled={clearLoading}
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 transition-colors"
+            title="Clear all logs"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+
+        {/* Quick Filter Chips: Method & Status */}
+        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
+          {/* Method Chips */}
+          <div className="flex items-center gap-1">
+            {METHOD_CHIPS.map((m) => {
+              const val = m === 'ALL' ? '' : m;
+              const isSelected = (filters.method || '') === val;
+              return (
+                <button
+                  key={m}
+                  onClick={() => setFilter('method', isSelected && val ? '' : val)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium transition-all ${
+                    isSelected
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                  }`}
+                >
+                  {m}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Status / Mock Chips */}
+          <div className="flex items-center gap-1">
+            {STATUS_CHIPS.map((s) => {
+              const isSelected = (filters.status || '') === s.value;
+              return (
+                <button
+                  key={s.label}
+                  onClick={() => setFilter('status', isSelected && s.value ? '' : s.value)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium transition-all ${
+                    isSelected
+                      ? 'bg-cyan-600 text-white shadow-sm'
+                      : `bg-slate-800/80 ${s.color || 'text-slate-400'} hover:bg-slate-700 opacity-80 hover:opacity-100`
+                  }`}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Advanced Filter: Devices */}
+        {showAdvanced && (
+          <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2">
+            <span className="text-[11px] text-slate-500 shrink-0">Device:</span>
             <select
               value={filters.sessionId}
               onChange={(e) => setFilter('sessionId', e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              className="flex-1 bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1"
             >
-              <option value="">All Devices</option>
+              <option value="">All Devices & Browsers</option>
               {devices.map((d) => (
                 <option key={d.session_id} value={d.session_id}>
-                  {d.name || d.session_id.slice(0, 8)}
+                  {d.name || d.session_id.slice(0, 8)} {d.is_online ? '● Online' : ''}
                 </option>
               ))}
             </select>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Request items */}
+      {/* Request items count & list */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950/40 text-[11px] text-slate-500 border-b border-slate-800/50">
+        <span>Showing {filteredRequests.length} of {requests.length} requests</span>
+        {hasActiveFilters && <span className="text-cyan-400">Filtered</span>}
+      </div>
+
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">
         {filteredRequests.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-40 text-slate-600 text-sm">
+          <div className="flex flex-col items-center justify-center h-48 text-slate-600 text-sm">
             <div className="text-3xl mb-2">📡</div>
-            <p>No requests yet</p>
-            <p className="text-xs mt-1">Proxy traffic will appear here</p>
+            <p className="font-medium text-slate-400">{requests.length === 0 ? 'No requests yet' : 'No matching requests'}</p>
+            <p className="text-xs mt-1 text-slate-500">
+              {requests.length === 0 ? 'Proxy traffic will appear here in real-time' : 'Try clearing search or filters'}
+            </p>
           </div>
         ) : (
           filteredRequests.map((req) => (
@@ -194,7 +250,6 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
       const parsed = JSON.parse(req.response_body);
       if (parsed && typeof parsed === 'object') {
         let codeValue = undefined;
-        // 支持 {"data": {"code": ...}} 或 {"code": ...} 格式
         if (parsed.data && 'code' in parsed.data) {
           codeValue = parsed.data.code;
         } else if ('code' in parsed) {
@@ -203,7 +258,6 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
 
         if (codeValue !== undefined && codeValue !== null) {
           const codeStr = String(codeValue);
-          // 如果 code 存在，且不等于 0 也不等于 200，则判定为错误（飘红）
           if (codeStr !== '0' && codeStr !== '200') {
             isRed = true;
           }
@@ -251,7 +305,7 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
         )}
       </div>
 
-      {/* Path - fills remaining space */}
+      {/* Path */}
       <div className={`${isRed ? 'text-red-400 font-semibold' : 'text-slate-300'} truncate font-mono text-[12px] flex-1 min-w-0`} title={displayPath}>
         {displayPath}
       </div>

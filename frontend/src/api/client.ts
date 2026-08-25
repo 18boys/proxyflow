@@ -128,6 +128,29 @@ export const requestsApi = {
       if (!r.ok) throw new Error('Shared request not found');
       return r.json() as Promise<{ curl: string }>;
     }),
+  replay: (id: number) =>
+    post<{
+      success: boolean;
+      log: import('../types').RequestLog;
+      statusCode: number;
+      headers: Record<string, string>;
+      body: string;
+      durationMs: number;
+    }>(`/requests/${id}/replay`),
+  sendCustom: (data: {
+    url: string;
+    method: string;
+    headers?: Record<string, string>;
+    body?: string | null;
+  }) =>
+    post<{
+      success: boolean;
+      log: import('../types').RequestLog;
+      statusCode: number;
+      headers: Record<string, string>;
+      body: string;
+      durationMs: number;
+    }>('/requests/send-custom', data),
 };
 
 // ── Stats ─────────────────────────────────────────────────────────────────

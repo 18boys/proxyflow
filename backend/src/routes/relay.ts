@@ -45,29 +45,33 @@ router.options('/', (req: Request, res: Response) => {
   res.status(204).send();
 });
 
+function isBinaryContentType(contentType: string): boolean {
+  const ct = (contentType || '').toLowerCase();
+  if (
+    ct.includes('application/json') ||
+    ct.includes('text/') ||
+    ct.includes('application/javascript') ||
+    ct.includes('application/xml') ||
+    ct.includes('application/x-www-form-urlencoded')
+  ) {
+    return false;
+  }
+  if (
+    ct.includes('image/') ||
+    ct.includes('audio/') ||
+    ct.includes('video/') ||
+    ct.includes('application/octet-stream') ||
+    ct.includes('application/pdf') ||
+    ct.includes('application/zip') ||
+    ct.includes('font/')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * POST /api/relay
- *
- * Mini-program SDK relay endpoint. Accepts a forwarded request from a mini-program,
- * applies mock rules if any match, otherwise proxies to the real target.
- *
- * Request body:
- *   {
- *     method: string,          // HTTP method (default: "GET")
- *     url: string,             // Full target URL (required)
- *     headers: object,         // Request headers (optional)
- *     body: string | null,     // Request body as string (optional)
- *     sessionId: string        // proxyflow session ID from pairing (required for tracking)
- *   }
- *
- * Response:
- *   {
- *     status: number,
- *     headers: object,
- *     body: string,
- *     isMocked: boolean,
- *     durationMs: number
- *   }
  */
 router.post('/', async (req: Request, res: Response): Promise<void> => {
   const {
@@ -85,6 +89,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   };
 
   if (!url) {
+    applyCorsHeaders(req, res);
     res.status(400).json({ error: 'url is required' });
     return;
   }
@@ -93,6 +98,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   try {
     targetUrl = new URL(url);
   } catch {
+    applyCorsHeaders(req, res);
     res.status(400).json({ error: 'Invalid url' });
     return;
   }
@@ -156,6 +162,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         });
 
         proxyReq.on('error', (err: Error) => {
+          applyCorsHeaders(req, res);
           res.status(502).json({ error: `Upstream error: ${err.message}` });
         });
 
@@ -178,7 +185,12 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       await new Promise((resolve) => setTimeout(resolve, mockMatch.rule.delay_ms));
     }
 
-    const responseHeaders = JSON.parse(mockMatch.version.response_headers) as Record<string, string>;
+    let responseHeaders: Record<string, string> = {};
+    try {
+      responseHeaders = JSON.parse(mockMatch.version.response_headers) as Record<string, string>;
+    } catch {
+      responseHeaders = { 'Content-Type': 'application/json' };
+    }
     const durationMs = Date.now() - startTime;
 
     const logId = await saveRequestLog({
@@ -238,12 +250,22 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       const chunks: Buffer[] = [];
       proxyRes.on('data', (chunk: Buffer) => chunks.push(chunk));
       proxyRes.on('end', async () => {
-        const responseBody = Buffer.concat(chunks).toString('utf8');
         const responseHeaders: Record<string, string> = {};
         for (const [k, v] of Object.entries(proxyRes.headers)) {
           if (v) responseHeaders[k] = Array.isArray(v) ? v.join(', ') : v;
         }
         delete responseHeaders['transfer-encoding'];
+
+        const contentType = String(responseHeaders['content-type'] || '');
+        const isBinary = isBinaryContentType(contentType);
+        const responseBuffer = Buffer.concat(chunks);
+
+        let responseBodyForLog: string;
+        if (isBinary) {
+          responseBodyForLog = `[Binary data: ${contentType || 'octet-stream'}, ${(responseBuffer.length / 1024).toFixed(1)} KB]`;
+        } else {
+          responseBodyForLog = responseBuffer.toString('utf8');
+        }
 
         const durationMs = Date.now() - startTime;
         const connectMs = socketConnectedAt != null ? socketConnectedAt - requestStartTime : undefined;
@@ -258,7 +280,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
           requestBody: reqBody ?? null,
           responseStatus: proxyRes.statusCode ?? 200,
           responseHeaders,
-          responseBody,
+          responseBody: responseBodyForLog,
           durationMs,
           isMocked: false,
           mockId: null,
@@ -275,7 +297,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         }
 
         applyCorsHeaders(req, res, responseHeaders);
-        res.status(proxyRes.statusCode ?? 200).send(responseBody);
+        res.status(proxyRes.statusCode ?? 200).send(responseBuffer);
         resolve();
       });
 
@@ -295,6 +317,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
           isMocked: false,
           mockId: null,
         });
+        applyCorsHeaders(req, res);
         res.status(502).json({ error: `Upstream error: ${err.message}` });
         resolve();
       });
@@ -322,12 +345,14 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         isMocked: false,
         mockId: null,
       });
+      applyCorsHeaders(req, res);
       res.status(502).json({ error: `Request failed: ${err.message}` });
       resolve();
     });
 
     proxyReq.on('timeout', () => {
       proxyReq.destroy();
+      applyCorsHeaders(req, res);
       res.status(504).json({ error: 'Request timeout' });
       resolve();
     });

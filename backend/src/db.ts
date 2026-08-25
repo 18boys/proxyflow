@@ -72,6 +72,16 @@ function syncSchema(database: Database): void {
     }
   }
 
+  // Create performance indexes
+  try {
+    database.exec('CREATE INDEX IF NOT EXISTS idx_request_logs_user_id ON request_logs(user_id, id);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_request_logs_created ON request_logs(created_at DESC);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_mock_rules_user_active ON mock_rules(user_id, is_active);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_mock_versions_rule_id ON mock_versions(rule_id);');
+  } catch (err) {
+    console.error('[db] Error creating indexes:', err);
+  }
+
   console.log('[db] Schema sync complete.');
 }
 

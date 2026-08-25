@@ -66,16 +66,27 @@ export function matchUrlPattern(pattern: string, url: string, matchType: string)
 function checkCondition(
   rule: MockRule,
   requestHeaders: Record<string, string>,
-  requestBody: string | null
+  requestBody: string | null,
+  requestUrl: string
 ): boolean {
   if (!rule.condition_field_type || !rule.condition_field_key || !rule.condition_field_value) {
     return true;
   }
 
-  if (rule.condition_field_type === 'header') {
+  const fieldType = rule.condition_field_type.toLowerCase();
+
+  if (fieldType === 'header') {
     const value = requestHeaders[rule.condition_field_key.toLowerCase()] || '';
     return value === rule.condition_field_value;
-  } else if (rule.condition_field_type === 'body') {
+  } else if (fieldType === 'query') {
+    try {
+      const parsedUrl = new URL(requestUrl.startsWith('http') ? requestUrl : `http://localhost${requestUrl}`);
+      const value = parsedUrl.searchParams.get(rule.condition_field_key) || '';
+      return value === rule.condition_field_value;
+    } catch {
+      return false;
+    }
+  } else if (fieldType === 'body') {
     if (!requestBody) return false;
     try {
       const body = JSON.parse(requestBody);
@@ -108,7 +119,7 @@ export function findMatchingMock(
   for (const rule of rules) {
     if (rule.method && rule.method.toUpperCase() !== method.toUpperCase()) continue;
     if (!matchUrlPattern(rule.url_pattern, url, rule.match_type)) continue;
-    if (!checkCondition(rule, requestHeaders, requestBody)) continue;
+    if (!checkCondition(rule, requestHeaders, requestBody, url)) continue;
 
     // Get active version
     let version: MockVersion | undefined;
@@ -129,6 +140,41 @@ export function findMatchingMock(
   }
 
   return null;
+}
+
+// In-memory counter to avoid checking DB count on every single request
+let requestCounterSinceCleanup = 0;
+
+function scheduleAsyncCleanup(userId: number | null) {
+  setImmediate(() => {
+    try {
+      const db = getDb();
+      // Count total records for this user / anonymous
+      const countResult = (userId !== null
+        ? db.prepare('SELECT COUNT(*) AS total FROM request_logs WHERE user_id = ?').get(userId)
+        : db.prepare('SELECT COUNT(*) AS total FROM request_logs WHERE user_id IS NULL').get()
+      ) as { total: number } | undefined;
+
+      const total = countResult?.total || 0;
+      // Only clean up when requests exceed 200, prune down to 100
+      if (total > 200) {
+        const cutoffRow = (userId !== null
+          ? db.prepare('SELECT id FROM request_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1 OFFSET 100').get(userId)
+          : db.prepare('SELECT id FROM request_logs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1 OFFSET 100').get()
+        ) as { id: number } | undefined;
+
+        if (cutoffRow?.id) {
+          if (userId !== null) {
+            db.prepare('DELETE FROM request_logs WHERE user_id = ? AND id < ?').run(userId, cutoffRow.id);
+          } else {
+            db.prepare('DELETE FROM request_logs WHERE user_id IS NULL AND id < ?').run(cutoffRow.id);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[proxy] Error in async request logs cleanup:', err);
+    }
+  });
 }
 
 export async function saveRequestLog(data: {
@@ -176,25 +222,11 @@ export async function saveRequestLog(data: {
   
   const lastInsertRowid = result.lastInsertRowid as number;
 
-  try {
-    // 每个用户最多保留 100 条请求，不再按时间清理
-    if (data.userId) {
-      db.prepare(`
-        DELETE FROM request_logs 
-        WHERE user_id = ? AND id NOT IN (
-          SELECT id FROM request_logs WHERE user_id = ? ORDER BY id DESC LIMIT 100
-        )
-      `).run(data.userId, data.userId);
-    } else {
-      db.prepare(`
-        DELETE FROM request_logs 
-        WHERE user_id IS NULL AND id NOT IN (
-          SELECT id FROM request_logs WHERE user_id IS NULL ORDER BY id DESC LIMIT 100
-        )
-      `).run();
-    }
-  } catch (err) {
-    console.error('[proxy] Error cleaning up old request logs:', err);
+  // Check cleanup asynchronously every 50 requests
+  requestCounterSinceCleanup++;
+  if (requestCounterSinceCleanup >= 50) {
+    requestCounterSinceCleanup = 0;
+    scheduleAsyncCleanup(data.userId);
   }
 
   return lastInsertRowid;
