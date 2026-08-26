@@ -347,8 +347,8 @@ export default function MocksPage() {
         <MockEditor
           rule={editingRule}
           defaultFolderId={defaultFolderId}
-          onClose={() => setShowEditor(false)}
-          onSaved={() => { setShowEditor(false); loadData(); }}
+          onClose={() => { setShowEditor(false); loadData(); }}
+          onSaved={() => { loadData(); }}
         />
       )}
 

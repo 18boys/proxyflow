@@ -80,6 +80,7 @@ function getBodyError(body: string): string | null {
 }
 
 export default function MockEditor({ rule, initialVersionId, defaultFolderId, onClose, onSaved }: MockEditorProps) {
+  const [currentRule, setCurrentRule] = useState<MockRule | null>(rule || null);
   const [name, setName] = useState(rule?.name || '');
   const [urlPattern, setUrlPattern] = useState(rule?.url_pattern || '');
   const [matchType, setMatchType] = useState<'exact' | 'wildcard' | 'regex'>(rule?.match_type || 'exact');
@@ -96,7 +97,9 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(rule?.active_version_id || null);
   const [editingVersionId, setEditingVersionId] = useState<number | null>(null);
   const [draftsByVersionId, setDraftsByVersionId] = useState<Record<number, MockVersionDraft>>({});
+  const [bodyView, setBodyView] = useState<'tree' | 'source'>('tree');
   const [saving, setSaving] = useState(false);
+  const [savedSuccess, setSavedSuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const statusCodeInputRef = useRef<HTMLInputElement>(null);
@@ -107,7 +110,19 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
   }, []);
 
   useEffect(() => {
+    setCurrentRule(rule || null);
     if (rule?.id) {
+      setName(rule.name || '');
+      setUrlPattern(rule.url_pattern || '');
+      setMatchType(rule.match_type || 'exact');
+      setMethod(rule.method || '');
+      setFolderId(rule.folder_id ?? defaultFolderId ?? null);
+      setDelayMs(rule.delay_ms ?? 0);
+      setCondType(rule.condition_field_type || '');
+      setCondKey(rule.condition_field_key || '');
+      setCondValue(rule.condition_field_value || '');
+      setSelectedVersionId(rule.active_version_id || null);
+
       mocksApi.listVersions(rule.id).then((loadedVersions) => {
         setVersions(loadedVersions);
         const initialVersion = loadedVersions.find((v) => v.id === initialVersionId)
@@ -123,14 +138,16 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
 
         if (initialVersion) {
           setEditingVersionId(initialVersion.id);
+          setBodyView('tree');
         }
       }).catch(console.error);
     } else {
       // New mock rule: initialize with default draft for versionId = 0
       setDraftsByVersionId({ 0: { ...DEFAULT_NEW_VERSION_DRAFT } });
       setEditingVersionId(0);
+      setBodyView('source');
     }
-  }, [initialVersionId, rule?.active_version_id, rule?.id]);
+  }, [initialVersionId, rule?.active_version_id, rule?.id, defaultFolderId]);
 
   const updateCurrentDraft = (changes: Partial<MockVersionDraft>) => {
     if (editingVersionId === null) return;
@@ -151,8 +168,11 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
     });
   };
 
-  const handleSelectForEdit = (versionId: number, options?: { focusStatusCode?: boolean }) => {
+  const handleSelectForEdit = (versionId: number, options?: { mode?: 'tree' | 'source'; focusStatusCode?: boolean }) => {
     setEditingVersionId(versionId);
+    if (options?.mode) {
+      setBodyView(options.mode);
+    }
 
     // Make sure a draft exists in state
     setDraftsByVersionId((prev) => {
@@ -181,7 +201,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
     setSaving(true);
     setError(null);
     try {
-      if (rule) {
+      if (currentRule) {
         // Validate all modified version drafts
         for (const [vIdStr, draft] of Object.entries(draftsByVersionId)) {
           const vId = Number(vIdStr);
@@ -196,7 +216,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
         }
 
         const tasks: Promise<unknown>[] = [
-          mocksApi.update(rule.id, {
+          mocksApi.update(currentRule.id, {
             name,
             url_pattern: urlPattern,
             match_type: matchType,
@@ -214,7 +234,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
         for (const [vIdStr, draft] of Object.entries(draftsByVersionId)) {
           const vId = Number(vIdStr);
           if (draft.isModified || vId === editingVersionId) {
-            tasks.push(mocksApi.updateVersion(rule.id, vId, {
+            tasks.push(mocksApi.updateVersion(currentRule.id, vId, {
               name: draft.name,
               response_status: draft.response_status,
               response_headers: draft.response_headers,
@@ -224,6 +244,15 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
         }
 
         await Promise.all(tasks);
+
+        // Fetch fresh versions to sync and clear modified states
+        const loadedVersions = await mocksApi.listVersions(currentRule.id);
+        setVersions(loadedVersions);
+        const nextDrafts: Record<number, MockVersionDraft> = {};
+        loadedVersions.forEach((v) => {
+          nextDrafts[v.id] = createVersionDraft(v);
+        });
+        setDraftsByVersionId(nextDrafts);
       } else {
         // Creating a new rule + initial version
         const initialDraft = draftsByVersionId[0] || DEFAULT_NEW_VERSION_DRAFT;
@@ -257,8 +286,19 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
           active_version_id: createdVersion.id,
           is_active: 1,
         });
+
+        setCurrentRule(createdRule);
+        setVersions([createdVersion]);
+        setSelectedVersionId(createdVersion.id);
+        setEditingVersionId(createdVersion.id);
+        setDraftsByVersionId({ [createdVersion.id]: createVersionDraft(createdVersion) });
       }
-      onSaved();
+
+      setSavedSuccess(true);
+      setTimeout(() => {
+        setSavedSuccess(false);
+      }, 2500);
+      onSaved?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Save failed');
     } finally {
@@ -287,10 +327,10 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
             </div>
             <div>
               <h2 className="text-base font-semibold text-slate-100">
-                {rule ? 'Edit Mock Rule' : 'New Mock Rule'}
+                {currentRule ? 'Edit Mock Rule' : 'New Mock Rule'}
               </h2>
               <p className="text-xs text-slate-500">
-                {rule ? `Editing rule “${rule.name}”` : 'Create a new mock rule and configure its response'}
+                {currentRule ? `Editing rule “${name || currentRule.name}”` : 'Create a new mock rule and configure its response'}
               </p>
             </div>
           </div>
@@ -417,14 +457,14 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
             <div className="pt-2 border-t border-slate-800/80">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                  Mock Versions {rule?.id ? `(${versions.length})` : ''}
+                  Mock Versions {currentRule?.id ? `(${versions.length})` : ''}
                 </span>
                 <span className="text-[10px] text-slate-500">
                   点击版本或编辑按钮修改响应
                 </span>
               </div>
 
-              {rule?.id ? (
+              {currentRule?.id ? (
                 <div className="space-y-2">
                   {versions.map((v) => {
                     const draft = draftsByVersionId[v.id] || createVersionDraft(v);
@@ -438,10 +478,13 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                         draft={draft}
                         isActive={isActive}
                         isEditing={isEditing}
-                        onSelectActive={() => setSelectedVersionId(v.id)}
-                        onStartEdit={(options) => handleSelectForEdit(v.id, options)}
+                        onSelectActive={() => {
+                          setSelectedVersionId(v.id);
+                          handleSelectForEdit(v.id, { mode: 'tree' });
+                        }}
+                        onStartEdit={(options) => handleSelectForEdit(v.id, { mode: 'source', ...options })}
                         onCopy={async () => {
-                          const copied = await mocksApi.createVersion(rule.id, {
+                          const copied = await mocksApi.createVersion(currentRule.id, {
                             name: `${draft.name} Copy`,
                             response_status: draft.response_status,
                             response_headers: draft.response_headers,
@@ -452,11 +495,11 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                             ...prev,
                             [copied.id]: createVersionDraft(copied),
                           }));
-                          handleSelectForEdit(copied.id, { focusStatusCode: true });
+                          handleSelectForEdit(copied.id, { mode: 'source', focusStatusCode: true });
                         }}
                         onDelete={async () => {
                           if (!confirm(`Delete mock version “${draft.name}”?`)) return;
-                          await mocksApi.deleteVersion(rule.id, v.id);
+                          await mocksApi.deleteVersion(currentRule.id, v.id);
                           const remaining = versions.filter((x) => x.id !== v.id);
                           setVersions(remaining);
                           setDraftsByVersionId((prev) => {
@@ -477,7 +520,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                   })}
 
                   <AddVersionRow
-                    ruleId={rule.id}
+                    ruleId={currentRule.id}
                     onAdded={(v) => {
                       setVersions((current) => [...current, v]);
                       setDraftsByVersionId((prev) => ({
@@ -485,7 +528,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                         [v.id]: createVersionDraft(v),
                       }));
                       setSelectedVersionId(v.id);
-                      handleSelectForEdit(v.id, { focusStatusCode: true });
+                      handleSelectForEdit(v.id, { mode: 'source', focusStatusCode: true });
                     }}
                   />
                 </div>
@@ -511,6 +554,8 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                 delayMs={delayMs}
                 onDelayChange={setDelayMs}
                 statusCodeInputRef={statusCodeInputRef}
+                bodyView={bodyView}
+                onBodyViewChange={setBodyView}
               />
             ) : (
               <div className="h-full min-h-64 flex items-center justify-center text-center text-slate-500">
@@ -526,7 +571,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
 
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-3.5 border-t border-slate-800 bg-slate-900/90">
-          <div className="text-xs text-slate-400">
+          <div className="flex items-center gap-3 text-xs text-slate-400">
             {editingVersionId !== null && activeDraft && (
               <span className="flex items-center gap-1.5">
                 <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
@@ -537,16 +582,25 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                 {activeDraft.isModified && <span className="text-amber-400 text-[11px]">(有未保存修改)</span>}
               </span>
             )}
+            {savedSuccess && (
+              <span className="flex items-center gap-1 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-[11px] font-medium">
+                <Check size={13} /> 已保存
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={onClose} className="btn-secondary text-sm">Cancel</button>
             <button
               onClick={handleSaveRule}
               disabled={saving}
-              className="btn-primary text-sm flex items-center gap-2"
+              className={`btn-primary text-sm flex items-center gap-2 ${savedSuccess ? 'bg-emerald-600 hover:bg-emerald-500 border-emerald-500' : ''}`}
             >
-              {saving && <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />}
-              {rule ? 'Save Mock' : 'Create Rule'}
+              {saving ? (
+                <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
+              ) : savedSuccess ? (
+                <Check size={14} />
+              ) : null}
+              {savedSuccess ? 'Saved' : (currentRule ? 'Save Mock' : 'Create Rule')}
             </button>
           </div>
         </div>
@@ -570,13 +624,13 @@ function VersionRow({
   isActive: boolean;
   isEditing: boolean;
   onSelectActive: () => void;
-  onStartEdit: (options?: { focusStatusCode?: boolean }) => void;
+  onStartEdit: (options?: { mode?: 'tree' | 'source'; focusStatusCode?: boolean }) => void;
   onCopy: () => void;
   onDelete: () => void;
 }) {
   return (
     <div
-      onClick={() => onStartEdit()}
+      onClick={() => onStartEdit({ mode: 'source' })}
       className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
         isEditing
           ? 'border-cyan-500 ring-1 ring-cyan-500/50 bg-slate-800/90 shadow-lg shadow-cyan-950/20'
@@ -623,7 +677,7 @@ function VersionRow({
 
         <button
           type="button"
-          onClick={() => onStartEdit({ focusStatusCode: true })}
+          onClick={() => onStartEdit({ mode: 'source', focusStatusCode: true })}
           title="Edit response code and body"
           className={`px-2 py-1 rounded text-xs transition-colors font-medium flex items-center gap-1 ${
             isEditing
@@ -663,18 +717,22 @@ function AddVersionRow({ ruleId, onAdded }: { ruleId: number; onAdded: (v: MockV
   const [show, setShow] = useState(false);
 
   const handleAdd = async () => {
-    if (!name.trim()) return;
+    const trimmed = name.trim() || `${statusCode} OK`;
+    const num = parseInt(statusCode, 10) || 200;
     setAdding(true);
     try {
-      const status = parseInt(statusCode, 10) || 200;
       const v = await mocksApi.createVersion(ruleId, {
-        name: name.trim(),
-        response_status: status,
+        name: trimmed,
+        response_status: num,
+        response_headers: '{\n  "Content-Type": "application/json"\n}',
+        response_body: '{\n  "code": 0,\n  "message": "success",\n  "data": {}\n}',
       });
       onAdded(v);
       setName('');
       setStatusCode('200');
       setShow(false);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add version');
     } finally {
       setAdding(false);
     }
@@ -683,44 +741,46 @@ function AddVersionRow({ ruleId, onAdded }: { ruleId: number; onAdded: (v: MockV
   if (!show) {
     return (
       <button
+        type="button"
         onClick={() => setShow(true)}
-        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 border border-dashed border-slate-700 hover:border-cyan-500/50 rounded-xl text-xs text-slate-400 hover:text-cyan-400 hover:bg-cyan-500/5 transition-all"
+        className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg border border-dashed border-slate-700 hover:border-cyan-500/60 text-slate-400 hover:text-cyan-400 text-xs transition-colors"
       >
-        <Plus size={14} /> Add Version
+        <Plus size={13} /> Add Version
       </button>
     );
   }
 
   return (
-    <div className="p-2.5 rounded-xl border border-cyan-500/40 bg-slate-800/80 space-y-2">
+    <div className="p-3 rounded-xl border border-cyan-500/30 bg-cyan-500/5 space-y-2">
+      <div className="text-xs font-semibold text-slate-300">New Version</div>
       <div className="flex gap-2">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Version name (e.g. 404 Not Found)"
-          className="flex-1 input-field text-xs py-1.5"
+          placeholder="Version Name (e.g. 404 Error)"
+          className="input-field text-xs flex-1"
           autoFocus
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
         />
         <input
-          type="number"
           value={statusCode}
           onChange={(e) => setStatusCode(e.target.value)}
-          placeholder="Code"
-          className="w-16 input-field text-xs py-1.5 font-mono text-center"
+          placeholder="200"
+          className="input-field text-xs w-16 font-mono text-center"
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
         />
       </div>
       <div className="flex justify-end gap-1.5">
         <button
-          onClick={() => { setShow(false); setName(''); setStatusCode('200'); }}
-          className="px-2.5 py-1 text-xs text-slate-400 hover:text-slate-200"
+          type="button"
+          onClick={() => setShow(false)}
+          className="btn-secondary text-xs px-2.5 py-1"
         >
           Cancel
         </button>
         <button
+          type="button"
           onClick={handleAdd}
-          disabled={adding || !name.trim()}
           className="px-3 py-1 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium rounded-lg disabled:opacity-40 transition-colors"
         >
           {adding ? 'Adding...' : 'Add Version'}
@@ -825,6 +885,8 @@ interface MockVersionFieldsProps {
   delayMs: number;
   onDelayChange: (delayMs: number) => void;
   statusCodeInputRef?: React.RefObject<HTMLInputElement>;
+  bodyView?: 'tree' | 'source';
+  onBodyViewChange?: (view: 'tree' | 'source') => void;
 }
 
 function MockVersionFields({
@@ -833,9 +895,16 @@ function MockVersionFields({
   delayMs,
   onDelayChange,
   statusCodeInputRef,
+  bodyView: externalBodyView,
+  onBodyViewChange,
 }: MockVersionFieldsProps) {
   const [headersCollapsed, setHeadersCollapsed] = useState(true);
-  const [bodyView, setBodyView] = useState<'tree' | 'source'>('tree');
+  const [internalBodyView, setInternalBodyView] = useState<'tree' | 'source'>('tree');
+  const bodyView = externalBodyView ?? internalBodyView;
+  const setBodyView = (view: 'tree' | 'source') => {
+    setInternalBodyView(view);
+    onBodyViewChange?.(view);
+  };
   const [statusInput, setStatusInput] = useState(String(draft.response_status || 200));
   const [aiDescription, setAiDescription] = useState('');
   const [aiLoading, setAiLoading] = useState(false);

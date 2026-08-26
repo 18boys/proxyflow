@@ -625,9 +625,11 @@ function MockTab({ log }: { log: RequestLog }) {
           initialVersionId={editingMock.versionId}
           onSaved={async () => {
             await loadMockData();
+          }}
+          onClose={async () => {
+            await loadMockData();
             setEditingMock(null);
           }}
-          onClose={() => setEditingMock(null)}
         />
       )}
     </div>
