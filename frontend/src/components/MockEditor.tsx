@@ -575,8 +575,8 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
           <div className="flex items-center gap-3 text-xs text-slate-400">
             {editingVersionId !== null && activeDraft && (
               <span className="flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
-                正在编辑：<strong className="text-slate-200">{activeDraft.name}</strong>
+                <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                {bodyView === 'source' ? '正在编辑：' : '当前查看：'}<strong className="text-slate-200">{activeDraft.name}</strong>
                 <span className={`px-1.5 py-0.2 rounded font-mono text-[11px] border ${getStatusBadgeStyle(activeDraft.response_status)}`}>
                   {activeDraft.response_status}
                 </span>
@@ -672,12 +672,6 @@ function VersionRow({
 
       {/* Actions */}
       <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
-        {isEditing ? (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">
-            Editing
-          </span>
-        ) : null}
-
         <button
           type="button"
           onClick={(e) => {
