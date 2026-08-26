@@ -482,6 +482,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                           setSelectedVersionId(v.id);
                           handleSelectForEdit(v.id, { mode: 'tree' });
                         }}
+                        onSelectVersion={() => handleSelectForEdit(v.id, { mode: 'tree' })}
                         onStartEdit={(options) => handleSelectForEdit(v.id, { mode: 'source', ...options })}
                         onCopy={async () => {
                           const copied = await mocksApi.createVersion(currentRule.id, {
@@ -615,6 +616,7 @@ function VersionRow({
   isActive,
   isEditing,
   onSelectActive,
+  onSelectVersion,
   onStartEdit,
   onCopy,
   onDelete,
@@ -624,13 +626,14 @@ function VersionRow({
   isActive: boolean;
   isEditing: boolean;
   onSelectActive: () => void;
+  onSelectVersion: () => void;
   onStartEdit: (options?: { mode?: 'tree' | 'source'; focusStatusCode?: boolean }) => void;
   onCopy: () => void;
   onDelete: () => void;
 }) {
   return (
     <div
-      onClick={() => onStartEdit({ mode: 'source' })}
+      onClick={() => onSelectVersion()}
       className={`group relative flex items-center gap-2 px-3 py-2.5 rounded-xl border transition-all cursor-pointer ${
         isEditing
           ? 'border-cyan-500 ring-1 ring-cyan-500/50 bg-slate-800/90 shadow-lg shadow-cyan-950/20'
@@ -677,7 +680,10 @@ function VersionRow({
 
         <button
           type="button"
-          onClick={() => onStartEdit({ mode: 'source', focusStatusCode: true })}
+          onClick={(e) => {
+            e.stopPropagation();
+            onStartEdit({ mode: 'source', focusStatusCode: true });
+          }}
           title="Edit response code and body"
           className={`px-2 py-1 rounded text-xs transition-colors font-medium flex items-center gap-1 ${
             isEditing

@@ -177,35 +177,51 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   return (
     <div className="flex flex-col h-full">
       {/* Header bar */}
-      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/50">
-        <div className="flex flex-wrap items-center gap-2 mb-2">
-          <span className={`px-2 py-0.5 rounded text-xs font-bold font-mono ${methodColor}`}>
-            {log.method}
-          </span>
-          {log.response_status && (
-            <span className={`text-sm font-bold font-mono status-${statusColor}`}>
-              {log.response_status}
+      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900/50 space-y-2.5">
+        {/* Row 1: Badges & Close button */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <span className={`px-2 py-0.5 rounded text-xs font-bold font-mono ${methodColor}`}>
+              {log.method}
             </span>
+            {log.response_status && (
+              <span className={`text-sm font-bold font-mono status-${statusColor}`}>
+                {log.response_status}
+              </span>
+            )}
+            {log.duration_ms !== null && (
+              <span className="text-xs text-slate-400 font-mono">{log.duration_ms}ms</span>
+            )}
+            {log.is_mocked === 1 && (
+              <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400">
+                MOCKED
+              </span>
+            )}
+            {replayMsg && (
+              <span className="text-xs text-cyan-400 font-mono animate-fade-in">
+                {replayMsg}
+              </span>
+            )}
+            {saveSuccess && (
+              <span className="text-xs text-emerald-400 flex items-center gap-1">
+                <Check size={12} /> Saved!
+              </span>
+            )}
+          </div>
+
+          {onClose && (
+            <button
+              onClick={onClose}
+              title="Close details (关闭详情)"
+              className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-slate-200 transition-colors shrink-0"
+            >
+              <X size={16} />
+            </button>
           )}
-          {log.duration_ms !== null && (
-            <span className="text-xs text-slate-400">{log.duration_ms}ms</span>
-          )}
-          {log.is_mocked === 1 && (
-            <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400">
-              MOCKED
-            </span>
-          )}
-          <div className="flex-1" />
-          {replayMsg && (
-            <span className="text-xs text-cyan-400 font-mono animate-fade-in">
-              {replayMsg}
-            </span>
-          )}
-          {saveSuccess && (
-            <span className="text-xs text-emerald-400 flex items-center gap-1">
-              <Check size={12} /> Saved!
-            </span>
-          )}
+        </div>
+
+        {/* Row 2: Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleReplay}
             disabled={replaying}
@@ -234,28 +250,22 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
           </button>
           <button
             onClick={handleShare}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700/80 transition-colors"
           >
             {shared ? <Check size={12} className="text-green-400" /> : <Share2 size={12} />}
             {shared ? 'Link Copied!' : 'Share'}
           </button>
           <button
             onClick={handleCopyCurl}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-300 text-xs transition-colors"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs border border-slate-700/80 transition-colors"
           >
             {copied ? <Check size={12} className="text-green-400" /> : <Copy size={12} />}
             {copied ? 'Copied!' : 'cURL'}
           </button>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="p-1 rounded-lg hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors ml-1"
-            >
-              <X size={16} />
-            </button>
-          )}
         </div>
-        <p className="text-xs font-mono text-slate-300 break-all">{log.url}</p>
+
+        {/* Row 3: URL */}
+        <p className="text-xs font-mono text-slate-300 break-all leading-relaxed">{log.url}</p>
       </div>
 
       {/* Save Mock Dialog */}
@@ -417,11 +427,13 @@ function MockTab({ log }: { log: RequestLog }) {
   } | null>(null);
   const [deletingVersionId, setDeletingVersionId] = useState<number | null>(null);
 
-  const loadMockData = useCallback(async () => {
-    setLoading(true);
-    setRules([]);
-    setVersions({});
-    setLocalState({});
+  const loadMockData = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+      setRules([]);
+      setVersions({});
+      setLocalState({});
+    }
     try {
       const allRules = await mocksApi.list();
       const matched = allRules.filter((rule) => matchesRule(rule, log));
@@ -435,7 +447,9 @@ function MockTab({ log }: { log: RequestLog }) {
       }));
       setVersions(versionMap);
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, [log]);
 
@@ -624,10 +638,10 @@ function MockTab({ log }: { log: RequestLog }) {
           rule={editingMock.rule}
           initialVersionId={editingMock.versionId}
           onSaved={async () => {
-            await loadMockData();
+            await loadMockData(true);
           }}
           onClose={async () => {
-            await loadMockData();
+            await loadMockData(true);
             setEditingMock(null);
           }}
         />

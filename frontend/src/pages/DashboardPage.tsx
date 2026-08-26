@@ -124,21 +124,16 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Detail Panel (right drawer) */}
-      <div
-        className={`absolute top-0 bottom-0 right-0 w-[500px] lg:w-[600px] bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col z-10 transition-all duration-300 ${
-          selectedRequestId ? 'translate-x-0' : 'translate-x-full'
-        } ${showAiPanel ? 'mr-96' : ''}`}
-      >
-        <RequestDetail requestId={selectedRequestId} onClose={() => setSelectedRequestId(null)} />
-      </div>
+      {/* Detail Panel */}
+      {selectedRequestId !== null && (
+        <div className="w-[500px] lg:w-[580px] xl:w-[680px] h-full shrink-0 bg-slate-900 border-l border-slate-700 shadow-2xl flex flex-col z-10 min-w-0">
+          <RequestDetail requestId={selectedRequestId} onClose={() => setSelectedRequestId(null)} />
+        </div>
+      )}
 
-      {/* AI Panel (right drawer) */}
-      <div 
-        className={`absolute right-0 top-0 bottom-0 w-96 bg-slate-900 border-l border-slate-700 flex flex-col z-20 transition-transform duration-300 ${
-          showAiPanel ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
+      {/* AI Panel */}
+      {showAiPanel && (
+        <div className="w-96 h-full shrink-0 bg-slate-900 border-l border-slate-700 flex flex-col z-20 min-w-0">
           <div className="flex items-center gap-2 px-4 py-3 border-b border-slate-800">
             <Bot size={16} className="text-purple-400" />
             <span className="text-sm font-semibold text-slate-200">AI Diagnosis</span>
@@ -165,6 +160,7 @@ export default function DashboardPage() {
             ) : null}
           </div>
         </div>
+      )}
     </div>
   );
 }
