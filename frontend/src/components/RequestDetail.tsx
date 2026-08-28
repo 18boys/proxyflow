@@ -26,6 +26,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   const [mockFolders, setMockFolders] = useState<MockFolder[]>([]);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [mockRefreshKey, setMockRefreshKey] = useState(0);
 
   useEffect(() => {
     if (!requestId) {
@@ -100,6 +101,8 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
       setSaveSuccess(true);
       setShowSaveMock(false);
       setMockName('');
+      setMockRefreshKey((k) => k + 1);
+      setActiveTab('mock');
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch {
       // ignore
@@ -370,7 +373,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
         )}
 
         {activeTab === 'mock' && (
-          <MockTab log={log} />
+          <MockTab log={log} refreshTrigger={mockRefreshKey} />
         )}
       </div>
 
@@ -414,7 +417,7 @@ function matchesRule(rule: MockRule, log: RequestLog): boolean {
 }
 
 // ── MockTab ────────────────────────────────────────────────────────────────
-function MockTab({ log }: { log: RequestLog }) {
+function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: number }) {
   const [rules, setRules] = useState<MockRule[]>([]);
   const [versions, setVersions] = useState<Record<number, MockVersion[]>>({});
   const [loading, setLoading] = useState(true);
@@ -454,8 +457,8 @@ function MockTab({ log }: { log: RequestLog }) {
   }, [log]);
 
   useEffect(() => {
-    void loadMockData();
-  }, [loadMockData]);
+    void loadMockData(rules.length > 0);
+  }, [loadMockData, refreshTrigger]);
 
   // Apply a version: enable this rule + disable all other matched rules
   const handleApply = async (ruleId: number, versionId: number) => {
