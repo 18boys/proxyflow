@@ -176,10 +176,26 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
 
     // Make sure a draft exists in state
     setDraftsByVersionId((prev) => {
-      if (prev[versionId]) return prev;
-      const v = versions.find((item) => item.id === versionId);
-      if (v) {
-        return { ...prev, [versionId]: createVersionDraft(v) };
+      let draft = prev[versionId];
+      if (!draft) {
+        const v = versions.find((item) => item.id === versionId);
+        if (v) {
+          draft = createVersionDraft(v);
+        }
+      }
+      if (draft && options?.mode === 'source' && draft.response_body?.trim()) {
+        try {
+          const parsed = JSON.parse(draft.response_body);
+          const formatted = JSON.stringify(parsed, null, 2);
+          if (formatted !== draft.response_body) {
+            draft = { ...draft, response_body: formatted };
+          }
+        } catch {
+          // keep original if invalid JSON
+        }
+      }
+      if (draft) {
+        return { ...prev, [versionId]: draft };
       }
       return prev;
     });
@@ -953,6 +969,21 @@ function MockVersionFields({
     }
   };
 
+  const handleSelectSource = () => {
+    if (draft.response_body && draft.response_body.trim()) {
+      try {
+        const parsed = JSON.parse(draft.response_body);
+        const formatted = JSON.stringify(parsed, null, 2);
+        if (formatted !== draft.response_body) {
+          onChange({ response_body: formatted });
+        }
+      } catch {
+        // Invalid JSON stays untouched
+      }
+    }
+    setBodyView('source');
+  };
+
   const handleAiGenerate = () => {
     if (!aiDescription.trim()) return;
     setAiLoading(true);
@@ -1178,7 +1209,7 @@ function MockVersionFields({
               </button>
               <button
                 type="button"
-                onClick={() => setBodyView('source')}
+                onClick={handleSelectSource}
                 className={`px-2.5 py-1 text-[11px] font-medium rounded-md transition-colors ${
                   bodyView === 'source' ? 'bg-cyan-600 text-white' : 'text-slate-400 hover:text-slate-200'
                 }`}
