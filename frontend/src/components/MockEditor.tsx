@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy, ChevronRight, Check, Sparkles, Clock } from 'lucide-react';
 import type { MockFolder, MockRule, MockVersion } from '../types';
 import { mocksApi, streamAiRequest } from '../api/client';
+import { useDialog } from '../context/DialogContext';
 import JsonViewer from './JsonViewer';
 
 interface MockEditorProps {
@@ -80,6 +81,7 @@ function getBodyError(body: string): string | null {
 }
 
 export default function MockEditor({ rule, initialVersionId, defaultFolderId, onClose, onSaved }: MockEditorProps) {
+  const { confirm, toast } = useDialog();
   const [currentRule, setCurrentRule] = useState<MockRule | null>(rule || null);
   const [name, setName] = useState(rule?.name || '');
   const [urlPattern, setUrlPattern] = useState(rule?.url_pattern || '');
@@ -515,21 +517,32 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                           handleSelectForEdit(copied.id, { mode: 'source', focusStatusCode: true });
                         }}
                         onDelete={async () => {
-                          if (!confirm(`Delete mock version “${draft.name}”?`)) return;
-                          await mocksApi.deleteVersion(currentRule.id, v.id);
-                          const remaining = versions.filter((x) => x.id !== v.id);
-                          setVersions(remaining);
-                          setDraftsByVersionId((prev) => {
-                            const next = { ...prev };
-                            delete next[v.id];
-                            return next;
+                          const ok = await confirm({
+                            title: '删除版本',
+                            message: `确定要删除 Mock 版本 “${draft.name}” 吗？`,
+                            confirmText: '删除版本',
+                            type: 'danger',
                           });
-                          if (selectedVersionId === v.id) {
-                            setSelectedVersionId(remaining[0]?.id || null);
-                          }
-                          if (editingVersionId === v.id) {
-                            const nextVer = remaining[0] ?? null;
-                            setEditingVersionId(nextVer ? nextVer.id : null);
+                          if (!ok) return;
+                          try {
+                            await mocksApi.deleteVersion(currentRule.id, v.id);
+                            const remaining = versions.filter((x) => x.id !== v.id);
+                            setVersions(remaining);
+                            setDraftsByVersionId((prev) => {
+                              const next = { ...prev };
+                              delete next[v.id];
+                              return next;
+                            });
+                            if (selectedVersionId === v.id) {
+                              setSelectedVersionId(remaining[0]?.id || null);
+                            }
+                            if (editingVersionId === v.id) {
+                              const nextVer = remaining[0] ?? null;
+                              setEditingVersionId(nextVer ? nextVer.id : null);
+                            }
+                            toast.success('版本已删除');
+                          } catch (err) {
+                            toast.error(err instanceof Error ? err.message : '删除版本失败');
                           }
                         }}
                       />
@@ -727,6 +740,7 @@ function VersionRow({
 }
 
 function AddVersionRow({ ruleId, onAdded }: { ruleId: number; onAdded: (v: MockVersion) => void }) {
+  const { toast } = useDialog();
   const [name, setName] = useState('');
   const [statusCode, setStatusCode] = useState('200');
   const [adding, setAdding] = useState(false);
@@ -747,8 +761,9 @@ function AddVersionRow({ ruleId, onAdded }: { ruleId: number; onAdded: (v: MockV
       setName('');
       setStatusCode('200');
       setShow(false);
+      toast.success('版本添加成功');
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to add version');
+      toast.error(err instanceof Error ? err.message : '添加版本失败');
     } finally {
       setAdding(false);
     }

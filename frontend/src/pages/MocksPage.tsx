@@ -5,9 +5,11 @@ import {
 } from 'lucide-react';
 import type { MockFolder, MockRule } from '../types';
 import { mocksApi, rulesApi, streamAiRequest } from '../api/client';
+import { useDialog } from '../context/DialogContext';
 import MockEditor from '../components/MockEditor';
 
 export default function MocksPage() {
+  const { confirm, toast } = useDialog();
   const [rules, setRules] = useState<MockRule[]>([]);
   const [folders, setFolders] = useState<MockFolder[]>([]);
   const [loading, setLoading] = useState(true);
@@ -84,9 +86,10 @@ export default function MocksPage() {
       setSelectedFolder(folder.id);
       setNewFolderName('');
       setShowNewFolder(false);
+      toast.success('文件夹创建成功');
       await loadData();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Could not create folder');
+      toast.error(error instanceof Error ? error.message : '创建文件夹失败');
     }
   };
 
@@ -100,23 +103,46 @@ export default function MocksPage() {
       await mocksApi.updateFolder(folder.id, renameFolderName.trim());
       setRenamingFolderId(null);
       setRenameFolderName('');
+      toast.success('文件夹已重命名');
       await loadData();
     } catch (error) {
-      alert(error instanceof Error ? error.message : 'Could not rename folder');
+      toast.error(error instanceof Error ? error.message : '重命名文件夹失败');
     }
   };
 
   const handleDeleteFolder = async (folder: MockFolder) => {
-    if (!confirm(`Delete folder “${folder.name}”? Its mocks will be moved to Unfiled.`)) return;
-    await mocksApi.deleteFolder(folder.id);
-    if (selectedFolder === folder.id) setSelectedFolder('unfiled');
-    await loadData();
+    const ok = await confirm({
+      title: '删除文件夹',
+      message: `确定要删除文件夹 “${folder.name}” 吗？其中的 Mock 规则将自动移至“未分类”。`,
+      confirmText: '删除文件夹',
+      type: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await mocksApi.deleteFolder(folder.id);
+      if (selectedFolder === folder.id) setSelectedFolder('unfiled');
+      toast.success('文件夹已删除');
+      await loadData();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除文件夹失败');
+    }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Delete this mock rule and all its versions?')) return;
-    await mocksApi.delete(id);
-    setRules(rules.filter((r) => r.id !== id));
+    const ok = await confirm({
+      title: '删除 Mock 规则',
+      message: '确定要删除此 Mock 规则及其所有响应版本吗？此操作无法撤销。',
+      confirmText: '删除规则',
+      type: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await mocksApi.delete(id);
+      setRules(rules.filter((r) => r.id !== id));
+      toast.success('Mock 规则已删除');
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : '删除 Mock 规则失败');
+    }
   };
 
   const handleExport = async () => {
@@ -137,10 +163,11 @@ export default function MocksPage() {
     try {
       const data = JSON.parse(text);
       const mocks = data.mocks || data;
-      await mocksApi.import(Array.isArray(mocks) ? mocks : []);
+      const res = await mocksApi.import(Array.isArray(mocks) ? mocks : []);
+      toast.success(`成功导入 ${res.imported} 条 Mock 规则`);
       loadData();
     } catch {
-      alert('Invalid JSON file');
+      toast.error('JSON 文件格式无效，请检查文件内容');
     }
     e.target.value = '';
   };

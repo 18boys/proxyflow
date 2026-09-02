@@ -151,6 +151,11 @@ export const requestsApi = {
       body: string;
       durationMs: number;
     }>('/requests/send-custom', data),
+  disableMock: (id: number) =>
+    post<{
+      success: boolean;
+      rule: import('../types').MockRule;
+    }>(`/requests/${id}/disable-mock`),
 };
 
 // ── Stats ─────────────────────────────────────────────────────────────────

@@ -20,11 +20,13 @@ const STATUS_CHIPS = [
 
 export default function RequestList({ onSelectRequest }: RequestListProps) {
   const {
-    requests, selectedRequestId, filters, setFilter, clearFilters,
-    selectedForDiagnosis, toggleDiagnosisSelection, devices
+    requests, selectedRequestId, setSelectedRequestId, filters, setFilter, clearFilters,
+    selectedForDiagnosis, toggleDiagnosisSelection, clearDiagnosisSelection, devices
   } = useStore();
   const [clearLoading, setClearLoading] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [disablingId, setDisablingId] = useState<number | null>(null);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
   const setRequests = useStore((s) => s.setRequests);
   const setDevices = useStore((s) => s.setDevices);
 
@@ -33,6 +35,31 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
       devicesApi.list().then(setDevices).catch(() => {});
     });
   }, [setDevices]);
+
+  const handleDisableMock = async (req: RequestLog) => {
+    setDisablingId(req.id);
+    try {
+      const res = await requestsApi.disableMock(req.id);
+      if (res.success) {
+        setToastMsg({ text: `Mock 规则 "${res.rule.name}" 已关闭`, type: 'success' });
+        setTimeout(() => setToastMsg((curr) => curr?.text.includes(res.rule.name) ? null : curr), 3500);
+
+        setRequests(
+          requests.map((r) => {
+            if (r.id === req.id || (res.rule.id && r.mock_id === res.rule.id)) {
+              return { ...r, is_mocked: 0 };
+            }
+            return r;
+          })
+        );
+      }
+    } catch (err) {
+      setToastMsg({ text: err instanceof Error ? err.message : '关闭 Mock 失败', type: 'error' });
+      setTimeout(() => setToastMsg(null), 3500);
+    } finally {
+      setDisablingId(null);
+    }
+  };
 
   const filteredRequests = requests.filter((req) => {
     if (filters.url) {
@@ -60,11 +87,15 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
   const hasActiveFilters = Object.values(filters).some(Boolean);
 
   const handleClear = async () => {
-    if (!confirm('Clear all captured request logs?')) return;
     setClearLoading(true);
     try {
       await requestsApi.clear();
       setRequests([]);
+      setToastMsg({ text: '已清空所有抓包日志', type: 'success' });
+      setTimeout(() => setToastMsg((curr) => curr?.text === '已清空所有抓包日志' ? null : curr), 2500);
+    } catch (err) {
+      setToastMsg({ text: err instanceof Error ? err.message : '清空日志失败', type: 'error' });
+      setTimeout(() => setToastMsg(null), 3500);
     } finally {
       setClearLoading(false);
     }
@@ -120,10 +151,10 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
           <button
             onClick={handleClear}
             disabled={clearLoading}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 transition-colors"
-            title="Clear all logs"
+            className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 border border-slate-700 transition-colors cursor-pointer disabled:opacity-50"
+            title="清空所有日志 (Clear all logs)"
           >
-            <Trash2 size={13} />
+            {clearLoading ? <RefreshCw size={13} className="animate-spin text-red-400" /> : <Trash2 size={13} />}
           </button>
         </div>
 
@@ -191,6 +222,20 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
         )}
       </div>
 
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className={`px-3 py-1.5 text-xs flex items-center justify-between border-b transition-all ${
+          toastMsg.type === 'success'
+            ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+            : 'bg-red-500/15 border-red-500/30 text-red-300'
+        }`}>
+          <span>{toastMsg.text}</span>
+          <button onClick={() => setToastMsg(null)} className="hover:opacity-75 p-0.5">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
       {/* Request items count & list */}
       <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950/40 text-[11px] text-slate-500 border-b border-slate-800/50">
         <span>Showing {filteredRequests.length} of {requests.length} requests</span>
@@ -213,8 +258,10 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
               req={req}
               isSelected={selectedRequestId === req.id}
               isSelectedForDiagnosis={selectedForDiagnosis.includes(req.id)}
+              isDisabling={disablingId === req.id}
               onClick={() => onSelectRequest(req.id)}
               onDiagnosisToggle={() => toggleDiagnosisSelection(req.id)}
+              onDisableMock={() => handleDisableMock(req)}
             />
           ))
         )}
@@ -227,11 +274,21 @@ interface RequestItemProps {
   req: RequestLog;
   isSelected: boolean;
   isSelectedForDiagnosis: boolean;
+  isDisabling?: boolean;
   onClick: () => void;
   onDiagnosisToggle: () => void;
+  onDisableMock: () => void;
 }
 
-function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagnosisToggle }: RequestItemProps) {
+function RequestItem({
+  req,
+  isSelected,
+  isSelectedForDiagnosis,
+  isDisabling,
+  onClick,
+  onDiagnosisToggle,
+  onDisableMock,
+}: RequestItemProps) {
   const statusColor = getStatusColor(req.response_status);
   const methodColor = getMethodColor(req.method);
 
@@ -299,9 +356,26 @@ function RequestItem({ req, isSelected, isSelectedForDiagnosis, onClick, onDiagn
           {req.method}
         </span>
         {req.is_mocked === 1 && (
-          <span className="px-1 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 shrink-0">
-            MOCK
-          </span>
+          <button
+            type="button"
+            disabled={isDisabling}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDisableMock();
+            }}
+            title="点击关闭此 Mock 规则"
+            className="group/mock px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 hover:bg-red-500/25 hover:text-red-300 hover:border-red-500/40 border border-emerald-500/30 transition-all shrink-0 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+          >
+            {isDisabling ? (
+              <RefreshCw size={10} className="animate-spin text-emerald-400" />
+            ) : (
+              <>
+                <span className="group-hover/mock:hidden">MOCK</span>
+                <span className="hidden group-hover/mock:inline">关闭</span>
+                <X size={10} className="opacity-70 group-hover/mock:opacity-100 group-hover/mock:scale-110 transition-transform" />
+              </>
+            )}
+          </button>
         )}
       </div>
 

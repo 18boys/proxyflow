@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2, RotateCw, Send, Plus, AlertCircle, WrapText } from 'lucide-react';
+import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2, RotateCw, RefreshCw, Send, Plus, AlertCircle, WrapText } from 'lucide-react';
 import type { MockFolder, RequestLog, MockRule, MockVersion } from '../types';
 import { getStatusColor, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
 import { requestsApi, mocksApi } from '../api/client';
+import { useStore } from '../store/useStore';
+import { useDialog } from '../context/DialogContext';
 import MockEditor from './MockEditor';
 import { copyToClipboard } from '../utils/clipboard';
 
@@ -27,6 +29,10 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [mockRefreshKey, setMockRefreshKey] = useState(0);
+  const [disablingMock, setDisablingMock] = useState(false);
+  const [disableMockMsg, setDisableMockMsg] = useState<string | null>(null);
+  const requests = useStore((s) => s.requests);
+  const setRequests = useStore((s) => s.setRequests);
 
   useEffect(() => {
     if (!requestId) {
@@ -108,6 +114,30 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
       // ignore
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDisableMock = async () => {
+    if (!log) return;
+    setDisablingMock(true);
+    try {
+      const res = await requestsApi.disableMock(log.id);
+      if (res.success) {
+        setLog((prev) => (prev ? { ...prev, is_mocked: 0 } : null));
+        setRequests(
+          requests.map((r) =>
+            r.id === log.id || (res.rule.id && r.mock_id === res.rule.id) ? { ...r, is_mocked: 0 } : r
+          )
+        );
+        setMockRefreshKey((k) => k + 1);
+        setDisableMockMsg(`Mock 规则 "${res.rule.name}" 已关闭`);
+        setTimeout(() => setDisableMockMsg(null), 3000);
+      }
+    } catch (err) {
+      setDisableMockMsg(err instanceof Error ? err.message : '关闭 Mock 失败');
+      setTimeout(() => setDisableMockMsg(null), 3000);
+    } finally {
+      setDisablingMock(false);
     }
   };
 
@@ -196,8 +226,27 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
               <span className="text-xs text-slate-400 font-mono">{log.duration_ms}ms</span>
             )}
             {log.is_mocked === 1 && (
-              <span className="px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400">
-                MOCKED
+              <button
+                type="button"
+                disabled={disablingMock}
+                onClick={handleDisableMock}
+                title="点击直接关闭此 Mock 规则"
+                className="group/mockdetail px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 hover:bg-red-500/25 hover:text-red-300 hover:border-red-500/40 border border-emerald-500/30 transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                {disablingMock ? (
+                  <RefreshCw size={11} className="animate-spin text-emerald-400" />
+                ) : (
+                  <>
+                    <span className="group-hover/mockdetail:hidden">MOCKED</span>
+                    <span className="hidden group-hover/mockdetail:inline">关闭 Mock</span>
+                    <X size={11} className="opacity-70 group-hover/mockdetail:opacity-100" />
+                  </>
+                )}
+              </button>
+            )}
+            {disableMockMsg && (
+              <span className="text-xs text-amber-400 font-mono animate-fade-in">
+                {disableMockMsg}
               </span>
             )}
             {replayMsg && (
@@ -418,6 +467,7 @@ function matchesRule(rule: MockRule, log: RequestLog): boolean {
 
 // ── MockTab ────────────────────────────────────────────────────────────────
 function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: number }) {
+  const { confirm, toast } = useDialog();
   const [rules, setRules] = useState<MockRule[]>([]);
   const [versions, setVersions] = useState<Record<number, MockVersion[]>>({});
   const [loading, setLoading] = useState(true);
@@ -484,8 +534,14 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
   };
 
   const handleDeleteVersion = async (ruleId: number, versionId: number) => {
-    const versionName = versions[ruleId]?.find((version) => version.id === versionId)?.name || 'this version';
-    if (!confirm(`Delete mock data “${versionName}”? This cannot be undone.`)) return;
+    const versionName = versions[ruleId]?.find((version) => version.id === versionId)?.name || '此版本';
+    const ok = await confirm({
+      title: '删除 Mock 版本',
+      message: `确定要删除 Mock 版本 “${versionName}” 吗？此操作无法撤销。`,
+      confirmText: '删除版本',
+      type: 'danger',
+    });
+    if (!ok) return;
     setDeletingVersionId(versionId);
     try {
       const result = await mocksApi.deleteVersion(ruleId, versionId);
@@ -504,6 +560,9 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
         }
         return prev;
       });
+      toast.success('Mock 版本已删除');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '删除 Mock 版本失败');
     } finally {
       setDeletingVersionId(null);
     }

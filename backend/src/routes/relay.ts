@@ -205,7 +205,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       responseBody: mockMatch.version.response_body,
       durationMs,
       isMocked: true,
-      mockId: mockMatch.version.id,
+      mockId: mockMatch.rule.id,
     });
 
     const db2 = getDb();

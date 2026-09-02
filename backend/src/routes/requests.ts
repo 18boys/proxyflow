@@ -75,7 +75,7 @@ router.get('/', requireAuth, (req: AuthRequest, res: Response): void => {
     startTime,
     endTime,
     page = '1',
-    limit = '100',
+    limit = '1000',
   } = req.query as Record<string, string>;
 
   // Show logs belonging to this user
@@ -143,7 +143,7 @@ router.get('/:id', requireAuth, (req: AuthRequest, res: Response): void => {
 // DELETE /api/requests - clear all requests
 router.delete('/', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
-  const result = db.prepare('DELETE FROM request_logs WHERE user_id = ?').run(req.userId!);
+  const result = db.prepare('DELETE FROM request_logs WHERE user_id = ? OR user_id IS NULL').run(req.userId!);
   res.json({ deleted: result.changes });
 });
 
@@ -296,6 +296,85 @@ router.post('/send-custom', requireAuth, async (req: AuthRequest, res: Response)
       error: err instanceof Error ? err.message : 'Custom send failed',
     });
   }
+});
+
+// POST /api/requests/:id/disable-mock - disable mock rule associated with this request
+router.post('/:id/disable-mock', requireAuth, (req: AuthRequest, res: Response): void => {
+  const db = getDb();
+  const requestId = Number(req.params['id']);
+  const log = db.prepare('SELECT * FROM request_logs WHERE id = ? AND user_id = ?').get(requestId, req.userId!) as {
+    id: number;
+    url: string;
+    method: string;
+    mock_id: number | null;
+    is_mocked: number;
+  } | undefined;
+
+  if (!log) {
+    res.status(404).json({ error: 'Request log not found' });
+    return;
+  }
+
+  let disabledRule: { id: number; name: string; is_active: number } | undefined;
+
+  // 1. Try finding by mock_id directly
+  if (log.mock_id) {
+    let rule = db.prepare('SELECT * FROM mock_rules WHERE id = ? AND user_id = ?').get(log.mock_id, req.userId!) as { id: number; name: string; is_active: number } | undefined;
+    if (!rule) {
+      const version = db.prepare('SELECT rule_id FROM mock_versions WHERE id = ? AND user_id = ?').get(log.mock_id, req.userId!) as { rule_id: number } | undefined;
+      if (version?.rule_id) {
+        rule = db.prepare('SELECT * FROM mock_rules WHERE id = ? AND user_id = ?').get(version.rule_id, req.userId!) as { id: number; name: string; is_active: number } | undefined;
+      }
+    }
+    if (rule) {
+      db.prepare("UPDATE mock_rules SET is_active = 0, updated_at = datetime('now', '+8 hours') WHERE id = ? AND user_id = ?").run(rule.id, req.userId!);
+      disabledRule = { ...rule, is_active: 0 };
+    }
+  }
+
+  // 2. If not found via mock_id, find by matching url_pattern & method from active rules
+  if (!disabledRule) {
+    const activeRules = db.prepare('SELECT * FROM mock_rules WHERE user_id = ? AND is_active = 1').all(req.userId!) as {
+      id: number;
+      name: string;
+      url_pattern: string;
+      match_type: string;
+      method: string | null;
+      is_active: number;
+    }[];
+    for (const rule of activeRules) {
+      if (rule.method && rule.method.toUpperCase() !== log.method.toUpperCase()) continue;
+      if (matchUrlPattern(rule.url_pattern, log.url, rule.match_type)) {
+        db.prepare("UPDATE mock_rules SET is_active = 0, updated_at = datetime('now', '+8 hours') WHERE id = ? AND user_id = ?").run(rule.id, req.userId!);
+        disabledRule = { id: rule.id, name: rule.name, is_active: 0 };
+        break;
+      }
+    }
+  }
+
+  // 3. If still not found, search all user rules matching url
+  if (!disabledRule) {
+    const allRules = db.prepare('SELECT * FROM mock_rules WHERE user_id = ?').all(req.userId!) as {
+      id: number;
+      name: string;
+      url_pattern: string;
+      match_type: string;
+      method: string | null;
+      is_active: number;
+    }[];
+    const matched = allRules.find((r) => (!r.method || r.method.toUpperCase() === log.method.toUpperCase()) && matchUrlPattern(r.url_pattern, log.url, r.match_type));
+    if (matched) {
+      db.prepare("UPDATE mock_rules SET is_active = 0, updated_at = datetime('now', '+8 hours') WHERE id = ? AND user_id = ?").run(matched.id, req.userId!);
+      disabledRule = { id: matched.id, name: matched.name, is_active: 0 };
+    }
+  }
+
+  if (!disabledRule) {
+    res.status(404).json({ error: 'No matching mock rule found to disable' });
+    return;
+  }
+
+  res.json({ success: true, rule: disabledRule });
 });
 
 export default router;

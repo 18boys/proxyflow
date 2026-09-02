@@ -23,7 +23,7 @@ export default function DashboardPage() {
   // Load initial requests and stats
   useEffect(() => {
     setLoadingRequests(true);
-    requestsApi.list({ limit: 100 })
+    requestsApi.list({ limit: 1000 })
       .then((data) => {
         setRequests(data.logs);
         prevRequestsLenRef.current = data.logs.length;

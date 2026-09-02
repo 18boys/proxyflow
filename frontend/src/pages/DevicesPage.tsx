@@ -4,10 +4,12 @@ import QRCode from 'react-qr-code';
 import type { DeviceSession } from '../types';
 import { devicesApi, settingsApi } from '../api/client';
 import { useStore } from '../store/useStore';
+import { useDialog } from '../context/DialogContext';
 import { copyToClipboard } from '../utils/clipboard';
 
 export default function DevicesPage() {
   const { devices, setDevices } = useStore();
+  const { confirm, toast } = useDialog();
   const [loading, setLoading] = useState(true);
   const [showPairModal, setShowPairModal] = useState(false);
   const [viewQrSessionId, setViewQrSessionId] = useState<string | null>(null);
@@ -23,10 +25,12 @@ export default function DevicesPage() {
     try {
       const [devData, settingsData] = await Promise.all([
         devicesApi.list(),
-        settingsApi.get(),
+        settingsApi.getExclusions(),
       ]);
       setDevices(devData);
-      setExclusions(settingsData.exclusion_domains);
+      setExclusions(settingsData.exclusion_domains || []);
+    } catch {
+      // ignore
     } finally {
       setLoading(false);
     }
@@ -37,9 +41,20 @@ export default function DevicesPage() {
   }, []);
 
   const handleDisconnect = async (sessionId: string) => {
-    if (!confirm('Disconnect this device?')) return;
-    await devicesApi.disconnect(sessionId);
-    setDevices(devices.filter((d) => d.session_id !== sessionId));
+    const ok = await confirm({
+      title: '断开设备连接',
+      message: '确定要断开此设备的连接吗？断开后该设备将无法通过此会话发送抓包数据。',
+      confirmText: '断开连接',
+      type: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await devicesApi.disconnect(sessionId);
+      setDevices(devices.filter((d) => d.session_id !== sessionId));
+      toast.success('设备已断开连接');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '断开连接失败');
+    }
   };
 
   const handleRename = async (sessionId: string) => {

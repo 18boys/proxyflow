@@ -156,11 +156,11 @@ function scheduleAsyncCleanup(userId: number | null) {
       ) as { total: number } | undefined;
 
       const total = countResult?.total || 0;
-      // Only clean up when requests exceed 200, prune down to 100
-      if (total > 200) {
+      // Only clean up when requests exceed 1200, prune down to 1000
+      if (total > 1200) {
         const cutoffRow = (userId !== null
-          ? db.prepare('SELECT id FROM request_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1 OFFSET 100').get(userId)
-          : db.prepare('SELECT id FROM request_logs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1 OFFSET 100').get()
+          ? db.prepare('SELECT id FROM request_logs WHERE user_id = ? ORDER BY id DESC LIMIT 1 OFFSET 1000').get(userId)
+          : db.prepare('SELECT id FROM request_logs WHERE user_id IS NULL ORDER BY id DESC LIMIT 1 OFFSET 1000').get()
         ) as { id: number } | undefined;
 
         if (cutoffRow?.id) {
@@ -348,7 +348,7 @@ export function createProxyServer(): http.Server {
         responseBody: mockMatch.version.response_body,
         durationMs,
         isMocked: true,
-        mockId: mockMatch.version.id,
+        mockId: mockMatch.rule.id,
       });
 
       {
