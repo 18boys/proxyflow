@@ -1,5 +1,5 @@
 import { useStore } from '../store/useStore';
-import { getStatusColor, getMethodColor } from '../types';
+import { getStatusColor, getStatusColorClass, getMethodColor } from '../types';
 import type { RequestLog } from '../types';
 import { Trash2, Filter, X, CheckSquare, Square, Search, RefreshCw, Zap } from 'lucide-react';
 import { useState, useEffect } from 'react';
@@ -70,7 +70,7 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
     }
     if (filters.method && req.method.toUpperCase() !== filters.method.toUpperCase()) return false;
     if (filters.status) {
-      if (filters.status === 'mock') {
+      if (filters.status === 'mock' || filters.status === 'mocked') {
         if (req.is_mocked !== 1) return false;
       } else {
         const status = req.response_status;
@@ -302,19 +302,26 @@ function RequestItem({
   }
 
   let isRed = false;
+  let businessCode: string | number | undefined = undefined;
+
+  // 1. HTTP 状态码非 200 判定为错误飘红
+  if (req.response_status && req.response_status !== 200) {
+    isRed = true;
+  }
+
+  // 2. 后端返回数据中的 code 字段非 200（且非 0）判定为错误飘红
   if (req.response_body) {
     try {
       const parsed = JSON.parse(req.response_body);
       if (parsed && typeof parsed === 'object') {
-        let codeValue = undefined;
-        if (parsed.data && 'code' in parsed.data) {
-          codeValue = parsed.data.code;
+        if (parsed.data && typeof parsed.data === 'object' && 'code' in parsed.data) {
+          businessCode = parsed.data.code;
         } else if ('code' in parsed) {
-          codeValue = parsed.code;
+          businessCode = parsed.code;
         }
 
-        if (codeValue !== undefined && codeValue !== null) {
-          const codeStr = String(codeValue);
+        if (businessCode !== undefined && businessCode !== null) {
+          const codeStr = String(businessCode);
           if (codeStr !== '0' && codeStr !== '200') {
             isRed = true;
           }
@@ -387,7 +394,14 @@ function RequestItem({
       {/* Trailing details */}
       <div className={`flex items-center gap-4 shrink-0 text-[11px] ${isRed ? 'text-red-400' : ''}`}>
         {req.response_status ? (
-          <span className={`w-8 text-center font-mono font-semibold status-${statusColor}`}>
+          <span
+            className={`w-8 text-center font-mono ${getStatusColorClass(req.response_status, isRed)}`}
+            title={
+              businessCode !== undefined && String(businessCode) !== '0' && String(businessCode) !== '200'
+                ? `HTTP ${req.response_status} (业务 code: ${businessCode})`
+                : `HTTP ${req.response_status}`
+            }
+          >
             {req.response_status}
           </span>
         ) : (

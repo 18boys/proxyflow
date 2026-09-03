@@ -116,6 +116,15 @@ export function getStatusColor(status: number | null): StatusColor {
   return 'gray';
 }
 
+export function getStatusColorClass(status: number | null, isError?: boolean): string {
+  if (isError) return 'text-red-400 font-bold';
+  if (!status) return 'text-slate-400 font-normal';
+  if (status >= 200 && status < 300) return 'text-emerald-400 font-semibold';
+  if (status >= 400 && status < 500) return 'text-orange-400 font-semibold';
+  if (status >= 500) return 'text-red-400 font-semibold';
+  return 'text-slate-400 font-normal';
+}
+
 export function getMethodColor(method: string): string {
   const colors: Record<string, string> = {
     GET: 'bg-blue-500/20 text-blue-400',

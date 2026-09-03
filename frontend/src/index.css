@@ -59,21 +59,23 @@
     @apply bg-slate-800/50 border border-slate-700 rounded-xl;
   }
 
-  .status-green {
-    @apply text-emerald-400;
-  }
+}
 
-  .status-orange {
-    @apply text-orange-400;
-  }
+/* Status colors (defined outside @layer to prevent purging) */
+.status-green {
+  color: #34d399; /* text-emerald-400 */
+}
 
-  .status-red {
-    @apply text-red-400;
-  }
+.status-orange {
+  color: #fb923c; /* text-orange-400 */
+}
 
-  .status-gray {
-    @apply text-slate-400;
-  }
+.status-red {
+  color: #f87171; /* text-red-400 */
+}
+
+.status-gray {
+  color: #94a3b8; /* text-slate-400 */
 }
 
 /* Light theme overrides */

@@ -4,7 +4,7 @@ import { Bookmark, Check, LogIn, Copy, ChevronRight } from 'lucide-react';
 import { requestsApi, mocksApi } from '../api/client';
 import { useStore } from '../store/useStore';
 import type { MockFolder, SharedRequest } from '../types';
-import { getStatusColor, getMethodColor, parseJson } from '../types';
+import { getStatusColor, getStatusColorClass, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from '../components/JsonViewer';
 import { copyToClipboard } from '../utils/clipboard';
 
@@ -72,7 +72,29 @@ export default function SharedRequestPage() {
     );
   }
 
-  const statusColor = getStatusColor(log.response_status);
+  let isError = Boolean(log.response_status && log.response_status !== 200);
+  let businessCode: string | number | undefined = undefined;
+  if (log.response_body) {
+    try {
+      const parsed = typeof log.response_body === 'string' ? JSON.parse(log.response_body) : log.response_body;
+      if (parsed && typeof parsed === 'object') {
+        if (parsed.data && typeof parsed.data === 'object' && 'code' in parsed.data) {
+          businessCode = parsed.data.code;
+        } else if ('code' in parsed) {
+          businessCode = parsed.code;
+        }
+        if (businessCode !== undefined && businessCode !== null) {
+          const codeStr = String(businessCode);
+          if (codeStr !== '0' && codeStr !== '200') {
+            isError = true;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   const methodColor = getMethodColor(log.method);
   const requestHeaders = parseJson(log.request_headers) as Record<string, string> || {};
   const responseHeaders = parseJson(log.response_headers) as Record<string, string> || {};
@@ -108,8 +130,20 @@ export default function SharedRequestPage() {
               {log.method}
             </span>
             {log.response_status && (
-              <span className={`text-sm font-bold font-mono status-${statusColor}`}>
+              <span
+                className={`text-sm font-bold font-mono ${getStatusColorClass(log.response_status, isError)}`}
+                title={
+                  businessCode !== undefined && String(businessCode) !== '0' && String(businessCode) !== '200'
+                    ? `HTTP ${log.response_status} (业务 code: ${businessCode})`
+                    : `HTTP ${log.response_status}`
+                }
+              >
                 {log.response_status}
+                {businessCode !== undefined && String(businessCode) !== '0' && String(businessCode) !== '200' && (
+                  <span className="ml-1 text-xs text-red-400/90 font-normal">
+                    (code: {String(businessCode)})
+                  </span>
+                )}
               </span>
             )}
             {log.duration_ms !== null && (
