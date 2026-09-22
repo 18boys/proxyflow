@@ -4,6 +4,7 @@ import http from 'http';
 import { getDb } from '../db';
 import { findMatchingMock, saveRequestLog } from '../proxy';
 import { wsManager } from '../websocket';
+import { safeStatus, parseHeaders } from '../mockUtils';
 
 const router = Router();
 
@@ -185,12 +186,8 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       await new Promise((resolve) => setTimeout(resolve, mockMatch.rule.delay_ms));
     }
 
-    let responseHeaders: Record<string, string> = {};
-    try {
-      responseHeaders = JSON.parse(mockMatch.version.response_headers) as Record<string, string>;
-    } catch {
-      responseHeaders = { 'Content-Type': 'application/json' };
-    }
+    const responseHeaders = parseHeaders(mockMatch.version.response_headers);
+    const mockStatus = safeStatus(mockMatch.version.response_status);
     const durationMs = Date.now() - startTime;
 
     const logId = await saveRequestLog({
@@ -200,7 +197,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       url,
       requestHeaders: normalizedHeaders,
       requestBody: reqBody ?? null,
-      responseStatus: mockMatch.version.response_status,
+      responseStatus: mockStatus,
       responseHeaders,
       responseBody: mockMatch.version.response_body,
       durationMs,
@@ -217,7 +214,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
     }
 
     applyCorsHeaders(req, res, responseHeaders);
-    res.status(mockMatch.version.response_status).send(mockMatch.version.response_body);
+    res.status(mockStatus).send(mockMatch.version.response_body);
     return;
   }
 

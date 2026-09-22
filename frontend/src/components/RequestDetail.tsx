@@ -266,15 +266,19 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
                 disabled={disablingMock}
                 onClick={handleDisableMock}
                 title="点击直接关闭此 Mock 规则"
-                className="group/mockdetail px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 hover:bg-red-500/25 hover:text-red-300 hover:border-red-500/40 border border-emerald-500/30 transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                className="group/mockdetail px-2 py-0.5 rounded text-xs font-bold bg-emerald-500/20 text-emerald-400 hover:bg-red-500/25 hover:text-red-300 hover:border-red-500/40 border border-emerald-500/30 transition-colors flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
               >
                 {disablingMock ? (
                   <RefreshCw size={11} className="animate-spin text-emerald-400" />
                 ) : (
                   <>
-                    <span className="group-hover/mockdetail:hidden">MOCKED</span>
-                    <span className="hidden group-hover/mockdetail:inline">关闭 Mock</span>
-                    <X size={11} className="opacity-70 group-hover/mockdetail:opacity-100" />
+                    <span className="inline-grid grid-cols-1 grid-rows-1 place-items-center">
+                      <span className="invisible col-start-1 row-start-1 select-none pointer-events-none">MOCKED</span>
+                      <span className="invisible col-start-1 row-start-1 select-none pointer-events-none">关闭 Mock</span>
+                      <span className="col-start-1 row-start-1 group-hover/mockdetail:hidden">MOCKED</span>
+                      <span className="col-start-1 row-start-1 hidden group-hover/mockdetail:inline">关闭 Mock</span>
+                    </span>
+                    <X size={11} className="opacity-70 group-hover/mockdetail:opacity-100 shrink-0" />
                   </>
                 )}
               </button>

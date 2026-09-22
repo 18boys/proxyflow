@@ -1,6 +1,7 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
+import { findRulesByPattern } from '../mockUtils';
 
 const router = Router();
 
@@ -85,35 +86,35 @@ router.patch('/:id/version', requireAuth, (req: AuthRequest, res: Response): voi
   res.json({ success: true });
 });
 
-// PATCH /api/rules/toggle-by-pattern - toggle a rule found by URL pattern + method (for MCP tooling)
+// PATCH /api/rules/toggle-by-pattern - toggle rule(s) found by URL pattern (+ optional method) (for MCP tooling)
+// Without `method`, every rule for that pattern is toggled; with it, only the rule for that method.
 router.patch('/toggle-by-pattern', requireAuth, (req: AuthRequest, res: Response): void => {
   const { url_pattern, method, enabled } = req.body;
 
-  if (!url_pattern || typeof enabled !== 'boolean') {
+  if (!url_pattern || typeof url_pattern !== 'string' || typeof enabled !== 'boolean') {
     res.status(400).json({ error: 'url_pattern and enabled (boolean) are required' });
     return;
   }
 
-  let pattern: string;
-  try {
-    pattern = new URL(url_pattern).pathname;
-  } catch {
-    pattern = (url_pattern as string).split('?')[0];
-  }
-
-  const normalizedMethod: string | null = method ? String(method).toUpperCase() : null;
-
-  const db = getDb();
-  const result = db.prepare(
-    "UPDATE mock_rules SET is_active = ?, updated_at = datetime('now', '+8 hours') WHERE user_id = ? AND url_pattern = ? AND method IS ?"
-  ).run(enabled ? 1 : 0, req.userId!, pattern, normalizedMethod);
-
-  if (result.changes === 0) {
+  const rules = findRulesByPattern(req.userId!, url_pattern, method ? String(method).toUpperCase() : undefined);
+  if (rules.length === 0) {
     res.status(404).json({ error: 'No mock rule found for this url_pattern/method. Call upsert_mock first.' });
     return;
   }
 
-  res.json({ success: true, is_active: enabled ? 1 : 0 });
+  const db = getDb();
+  const update = db.prepare(
+    "UPDATE mock_rules SET is_active = ?, updated_at = datetime('now', '+8 hours') WHERE id = ? AND user_id = ?"
+  );
+  for (const r of rules) update.run(enabled ? 1 : 0, r.id, req.userId!);
+
+  res.json({
+    success: true,
+    is_active: enabled ? 1 : 0,
+    updated: rules.map((r) => ({
+      id: r.id, method: r.method, url_pattern: r.url_pattern, has_active_version: r.active_version_id !== null,
+    })),
+  });
 });
 
 export default router;

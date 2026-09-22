@@ -5,6 +5,7 @@ import { getDb } from '../db';
 import { buildCurl, executeReplayRequest } from '../requestReplay';
 import { createSharedRequest } from '../sharedRequests';
 import { matchUrlPattern, saveRequestLog } from '../proxy';
+import { normalizeUrlPattern } from '../mockUtils';
 import { wsManager } from '../websocket';
 
 const router = Router();
@@ -19,49 +20,72 @@ function tryParseJson(value: unknown): unknown {
 }
 
 // GET /api/requests/wait - wait for the next request matching a URL pattern (for MCP tooling)
+//   lookback_ms: also consider requests captured this long ago (avoids the "already fired" race)
+//   only_real:   ignore mocked responses
 router.get('/wait', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
-  const { url_pattern, method } = req.query as { url_pattern?: string; method?: string };
+  const { url_pattern, method, only_real } = req.query as { url_pattern?: string; method?: string; only_real?: string };
   const timeoutMs = Math.min(60_000, Math.max(1000, Number(req.query['timeout_ms']) || 30_000));
+  const lookbackMs = Math.min(300_000, Math.max(0, Number(req.query['lookback_ms']) || 0));
 
   if (!url_pattern) {
     res.status(400).json({ error: 'url_pattern is required' });
     return;
   }
 
+  let closed = false;
+  res.on('close', () => { closed = true; });
+
   const db = getDb();
+  const userId = req.userId!;
   const normalizedMethod = method ? method.toUpperCase() : null;
-  const sinceId = (db.prepare(
-    'SELECT COALESCE(MAX(id), 0) AS id FROM request_logs WHERE user_id = ?'
-  ).get(req.userId!) as { id: number }).id;
+  const realOnly = only_real === 'true' || only_real === '1';
+  const { pattern } = normalizeUrlPattern(url_pattern);
+  const startedAt = Date.now();
 
-  const deadline = Date.now() + timeoutMs;
+  // Everything with id > sinceId is a candidate.
+  const sinceId = lookbackMs > 0
+    ? (db.prepare(
+        "SELECT COALESCE(MAX(id), 0) AS id FROM request_logs WHERE user_id = ? AND created_at < datetime('now', '+8 hours', ?)"
+      ).get(userId, `-${Math.ceil(lookbackMs / 1000)} seconds`) as { id: number }).id
+    : (db.prepare('SELECT COALESCE(MAX(id), 0) AS id FROM request_logs WHERE user_id = ?').get(userId) as { id: number }).id;
 
-  while (Date.now() < deadline) {
-    const logs = db.prepare(
-      'SELECT * FROM request_logs WHERE user_id = ? AND id > ? ORDER BY id ASC'
-    ).all(req.userId!, sinceId) as Record<string, unknown>[];
+  // Only fetch the cheap columns while polling; load the full row once matched.
+  const scan = db.prepare('SELECT id, method, url, is_mocked FROM request_logs WHERE user_id = ? AND id > ? ORDER BY id ASC');
+  let cursor = sinceId;
+  const deadline = startedAt + timeoutMs;
 
-    const match = logs.find((log) => {
-      if (normalizedMethod && (log['method'] as string).toUpperCase() !== normalizedMethod) return false;
-      return matchUrlPattern(url_pattern, log['url'] as string, 'wildcard');
+  while (Date.now() < deadline && !closed) {
+    const rows = scan.all(userId, cursor) as { id: number; method: string; url: string; is_mocked: number }[];
+    const hits = rows.filter((row) => {
+      if (row.method === 'CONNECT') return false;
+      if (normalizedMethod && row.method.toUpperCase() !== normalizedMethod) return false;
+      if (realOnly && row.is_mocked) return false;
+      return matchUrlPattern(pattern, row.url, 'wildcard');
     });
 
-    if (match) {
+    if (hits.length > 0) {
+      // Live wait -> first hit; look-back -> the most recent hit is the interesting one.
+      const hit = lookbackMs > 0 ? hits[hits.length - 1] : hits[0];
+      const log = db.prepare('SELECT * FROM request_logs WHERE id = ?').get(hit.id) as Record<string, unknown>;
       res.json({
         matched: true,
+        waited_ms: Date.now() - startedAt,
         request: {
-          ...match,
-          request_body: tryParseJson(match['request_body']),
-          response_body: tryParseJson(match['response_body']),
+          ...log,
+          request_headers: tryParseJson(log['request_headers']),
+          response_headers: tryParseJson(log['response_headers']),
+          request_body: tryParseJson(log['request_body']),
+          response_body: tryParseJson(log['response_body']),
         },
       });
       return;
     }
 
-    await sleep(500);
+    if (rows.length > 0) cursor = rows[rows.length - 1].id;
+    await sleep(300);
   }
 
-  res.json({ matched: false });
+  if (!closed) res.json({ matched: false, waited_ms: Date.now() - startedAt });
 });
 
 // GET /api/requests - list with filters

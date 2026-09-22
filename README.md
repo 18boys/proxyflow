@@ -8,7 +8,7 @@
 proxyflow/
 ├── backend/     # Express API Server + HTTP 代理服务器
 ├── frontend/    # React + Vite 控制台界面
-└── sdk/         # 各端 SDK（React Native / 小程序）
+└── sdk/         # 各端 SDK（Web / React Native / 小程序）
 ```
 
 **端口说明：**
@@ -144,5 +144,6 @@ cp backend/proxyflow.db backend/proxyflow-backup-$(date +%Y%m%d).db
 
 ## SDK 集成
 
+- Web 端（浏览器/H5）：[sdk/web/README.md](./sdk/web/README.md)
 - React Native：[sdk/react-native/README.md](./sdk/react-native/README.md)
 - 微信小程序：[sdk/miniprogram/README.md](./sdk/miniprogram/README.md)

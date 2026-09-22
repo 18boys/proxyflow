@@ -98,6 +98,267 @@ const data = await res.json();
 
 ---
 
+### 方式三：Dev Server / BFF 代理模式（强烈推荐用于现代 Web 工程）
+
+如果你的 Web 工程在本地开发时依赖代理做环境切换（如动态切 `dev` / `qa` 环境），或者业务依赖 **HttpOnly Cookie** 鉴权，强烈推荐直接在工程的 Dev Server / BFF 代理层接入 Proxyflow。
+
+**核心优势**：
+- **零业务代码侵入**：前端项目无需引入 SDK，业务代码直接调用相对路径（如 `/api/user`）；
+- **Cookie 完整保留**：浏览器发往同源 Dev Server 会自动带上所有 Cookie（包括 HttpOnly），由 Node.js 服务端透传给 Proxyflow；
+- **环境切换无缝保留**：目标环境域名（如 `https://qa.example.com`）由工程配置动态拼接，域名与环境信息丝毫不丢失。
+
+---
+
+#### 核心转发工具：`proxyflow-relay.mjs`
+
+在你的项目中新建 `proxyflow-relay.mjs`（或直接从 `@proxyflow/web-sdk/relay` 引入）：
+
+```javascript
+// proxyflow-relay.mjs
+export async function relayToProxyflow(
+  req,
+  res,
+  {
+    targetEnv,
+    sessionId = process.env.PROXYFLOW_SESSION_ID,
+    proxyflowUrl = process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
+  } = {}
+) {
+  if (!sessionId) {
+    console.warn('[Proxyflow Relay] 警告: 未提供 sessionId，且 process.env.PROXYFLOW_SESSION_ID 为空。请在 .env.local 中配置 PROXYFLOW_SESSION_ID 或显式传入。');
+  }
+  const targetUrl = new URL(req.url, targetEnv).toString();
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  const body = chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : null;
+
+  try {
+    const relayRes = await fetch(`${proxyflowUrl.replace(/\/$/, '')}/api/relay`, {
+      method: req.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        method: req.method,
+        url: targetUrl,
+        headers: req.headers, // 完整携带浏览器带过来的 Cookie 和所有请求头
+        body,
+        sessionId,
+      }),
+    });
+
+    res.statusCode = relayRes.status;
+    relayRes.headers.forEach((val, key) => {
+      if (key !== 'transfer-encoding' && key !== 'content-encoding') res.setHeader(key, val);
+    });
+    const data = await relayRes.arrayBuffer();
+    res.end(Buffer.from(data));
+  } catch (err) {
+    res.statusCode = 502;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ error: `Proxyflow relay failed: ${err.message}` }));
+  }
+}
+
+// Vite 插件辅助函数
+export function proxyflowPlugin({
+  targetEnv,
+  sessionId = process.env.PROXYFLOW_SESSION_ID,
+  proxyflowUrl = process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
+  prefix = '/api',
+} = {}) {
+  return {
+    name: 'vite-plugin-proxyflow',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        if (req.url?.startsWith(prefix)) {
+          relayToProxyflow(req, res, { targetEnv, sessionId, proxyflowUrl });
+        } else {
+          next();
+        }
+      });
+    },
+  };
+}
+```
+
+---
+
+#### 💡 团队协作最佳实践：通过 `.env.local` 配置各自的 Session ID
+
+在多人协作的项目中，每个人配对的 Proxyflow 设备 Session ID 都不一样。**强烈建议将 Session ID 存放在本地私有环境变量文件 `.env.local` 中**：
+
+1. 在项目根目录创建 `.env.local`（确认已在 `.gitignore` 中，避免提交到 Git）：
+   ```ini
+   # .env.local (各开发者本地私有配置，不提交 Git)
+   PROXYFLOW_SESSION_ID=你的-SESSION-ID
+   # 可选：覆盖 Proxyflow 服务地址（默认即为 http://172.31.0.8:9000）
+   # PROXYFLOW_URL=http://172.31.0.8:9000
+   # 可选：切换目标环境
+   # API_ENV=qa
+   ```
+2. 每位开发者只需在自己本地的 `.env.local` 中填入自己的 `PROXYFLOW_SESSION_ID`，互不干扰、互不覆盖。
+3. `relayToProxyflow` 与 `proxyflowPlugin` **内置自动读取** `process.env.PROXYFLOW_SESSION_ID` 和 `process.env.PROXYFLOW_URL`，在代码中甚至可以完全省略这两个参数！
+
+---
+
+#### 各场景极简接入示例
+
+##### 1. Vite 工程 (`vite.config.ts`) —— 仅需引入插件
+
+```typescript
+import { defineConfig, loadEnv } from 'vite';
+import { proxyflowPlugin } from '@proxyflow/web-sdk/relay'; // 或 './proxyflow-relay.mjs'
+
+export default defineConfig(({ mode }) => {
+  // 加载本地 .env.local
+  const env = loadEnv(mode, process.cwd(), '');
+  const TARGET_ENV = env.API_ENV === 'dev' ? 'https://dev.example.com' : 'https://qa.example.com';
+
+  return {
+    server: {
+      plugins: [
+        proxyflowPlugin({
+          targetEnv: TARGET_ENV,
+          sessionId: env.PROXYFLOW_SESSION_ID, // 自动从 .env.local 读取，团队成员各配各的
+          proxyflowUrl: env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
+        }),
+      ],
+    },
+  };
+});
+```
+
+##### 2. Next.js 工程
+
+Next.js 原生自动加载根目录的 `.env.local` 到 `process.env`，无需任何配置。
+
+###### App Router (`app/api/[...path]/route.ts`)
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server';
+
+const TARGET_ENV = process.env.API_ENV === 'dev' ? 'https://dev.example.com' : 'https://qa.example.com';
+const PROXYFLOW_URL = process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000';
+const PROXYFLOW_SESSION_ID = process.env.PROXYFLOW_SESSION_ID; // 自动读取本地 .env.local
+
+async function handleRelay(request: NextRequest, { params }: { params: { path: string[] } }) {
+  const path = '/' + (params.path || []).join('/');
+  const targetUrl = `${TARGET_ENV}/api${path}${request.nextUrl.search}`;
+  const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : null;
+
+  const headers: Record<string, string> = {};
+  request.headers.forEach((val, key) => { headers[key.toLowerCase()] = val; });
+
+  try {
+    const relayRes = await fetch(`${PROXYFLOW_URL}/api/relay`, {
+      method: request.method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ method: request.method, url: targetUrl, headers, body, sessionId: PROXYFLOW_SESSION_ID }),
+    });
+    const resHeaders = new Headers();
+    relayRes.headers.forEach((val, key) => {
+      if (key !== 'transfer-encoding' && key !== 'content-encoding') resHeaders.set(key, val);
+    });
+    return new NextResponse(await relayRes.arrayBuffer(), { status: relayRes.status, headers: resHeaders });
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 502 });
+  }
+}
+
+export const GET = handleRelay;
+export const POST = handleRelay;
+export const PUT = handleRelay;
+export const DELETE = handleRelay;
+export const PATCH = handleRelay;
+```
+
+###### Pages Router (`pages/api/[...path].ts`) —— 仅 3 行
+
+```typescript
+import { relayToProxyflow } from '@proxyflow/web-sdk/relay'; // 或 '../../proxyflow-relay.mjs'
+
+export const config = { api: { bodyParser: false } };
+export default (req: any, res: any) =>
+  relayToProxyflow(req, res, {
+    targetEnv: process.env.API_ENV === 'dev' ? 'https://dev.example.com' : 'https://qa.example.com',
+    sessionId: process.env.PROXYFLOW_SESSION_ID, // 自动从 .env.local 读取
+    proxyflowUrl: process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
+  });
+```
+
+##### 3. Nuxt.js / Nuxt 3 (`server/routes/api/[...path].ts`) —— 仅 3 行
+
+Nuxt 3 原生自动加载 `.env` / `.env.local` 到 `process.env`：
+
+```typescript
+import { relayToProxyflow } from '@proxyflow/web-sdk/relay'; // 或 '~/proxyflow-relay.mjs'
+
+export default defineEventHandler((event) =>
+  relayToProxyflow(event.node.req, event.node.res, {
+    targetEnv: process.env.API_ENV === 'dev' ? 'https://dev.example.com' : 'https://qa.example.com',
+    sessionId: process.env.PROXYFLOW_SESSION_ID, // 自动从 .env.local 读取
+    proxyflowUrl: process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
+  })
+);
+```
+
+##### 4. Webpack / Vue CLI (`vue.config.js` / `webpack.config.js`) —— 仅 3 行
+
+> Vue CLI 默认原生加载 `.env.local`。如果是原生 Webpack，可先执行 `npm i -D dotenv` 并在配置首行加入 `require('dotenv').config({ path: '.env.local' });`。
+
+```javascript
+// 原生 Webpack 如果未加载环境变量，可解开下行注释：
+// require('dotenv').config({ path: '.env.local' });
+
+const { relayToProxyflow } = require('@proxyflow/web-sdk/relay'); // 或 './proxyflow-relay.cjs'
+
+const TARGET_ENV = process.env.API_ENV === 'dev' ? 'https://dev.example.com' : 'https://qa.example.com';
+
+module.exports = {
+  devServer: {
+    setupMiddlewares: (middlewares, devServer) => {
+      devServer.app.use((req, res, next) => {
+        if (req.url.startsWith('/api/')) {
+          relayToProxyflow(req, res, {
+            targetEnv: TARGET_ENV,
+            sessionId: process.env.PROXYFLOW_SESSION_ID, // 自动从本地 .env.local 获取，团队成员各配各的
+            proxyflowUrl: process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
+          });
+        } else {
+          next();
+        }
+      });
+      return middlewares;
+    },
+  },
+};
+```
+
+##### 5. Turborepo (Turbo Monorepo)
+
+在 Monorepo 根目录下创建 `.env.local` 统一管理本地私有环境变量：
+
+```ini
+API_ENV=qa
+PROXYFLOW_URL=http://172.31.0.8:9000
+PROXYFLOW_SESSION_ID=你的-SESSION-ID
+```
+
+并在 `turbo.json` 的 `globalEnv` 中声明：
+
+```json
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalEnv": ["API_ENV", "PROXYFLOW_URL", "PROXYFLOW_SESSION_ID"],
+  "tasks": {
+    "dev": { "cache": false, "persistent": true }
+  }
+}
+```
+
+---
+
+---
+
 ## 初始化参数
 
 | 参数 | 类型 | 必填 | 说明 |

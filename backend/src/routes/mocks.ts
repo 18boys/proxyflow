@@ -2,6 +2,9 @@ import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
 import { getSharedRequest } from '../sharedRequests';
+import {
+  MATCH_TYPES, normalizeUrlPattern, parseHeaders, stripHopHeaders, findRulesByPattern,
+} from '../mockUtils';
 
 const router = Router();
 
@@ -675,68 +678,227 @@ router.post('/from-request', requireAuth, (req: AuthRequest, res: Response): voi
   res.status(201).json(rule);
 });
 
+// ── MCP helpers: pattern-addressed operations ──────────────────────────────
+
+function bad(res: Response, error: string): void {
+  res.status(400).json({ error });
+}
+
+function ruleSummary(ruleId: number | bigint) {
+  const db = getDb();
+  const rule = db.prepare('SELECT * FROM mock_rules WHERE id = ?').get(ruleId) as Record<string, unknown>;
+  const versions = db.prepare(
+    'SELECT id, name, response_status FROM mock_versions WHERE rule_id = ? ORDER BY created_at ASC, id ASC'
+  ).all(ruleId);
+  const activeVersion = rule['active_version_id']
+    ? db.prepare('SELECT * FROM mock_versions WHERE id = ?').get(rule['active_version_id'])
+    : null;
+  return { ...rule, version_count: versions.length, versions, active_version: activeVersion };
+}
+
 // POST /api/mocks/upsert - create or update a mock by URL pattern (for MCP tooling)
 router.post('/upsert', requireAuth, (req: AuthRequest, res: Response): void => {
   const {
     url_pattern, method, response_status, response_body, response_headers,
-    match_type, name, delay_ms, enabled,
+    match_type, name, version_name, delay_ms, enabled, activate,
+    condition, from_request_id,
   } = req.body;
 
-  if (!url_pattern) {
-    res.status(400).json({ error: 'url_pattern is required' });
-    return;
+  if (!url_pattern || typeof url_pattern !== 'string') return bad(res, 'url_pattern is required');
+
+  if (match_type !== undefined && !(MATCH_TYPES as readonly string[]).includes(match_type)) {
+    return bad(res, `match_type must be one of: ${MATCH_TYPES.join(', ')}`);
+  }
+  if (response_status !== undefined && !(Number.isInteger(response_status) && response_status >= 100 && response_status <= 599)) {
+    return bad(res, 'response_status must be an integer between 100 and 599');
+  }
+  let delay: number | undefined;
+  if (delay_ms !== undefined) {
+    const d = parseDelayMs(delay_ms);
+    if (d === null) return bad(res, 'delay_ms must be between 0 and 60000');
+    delay = d;
+  }
+  if (response_headers !== undefined && (typeof response_headers !== 'object' || response_headers === null || Array.isArray(response_headers))) {
+    return bad(res, 'response_headers must be an object of header name -> value');
+  }
+  if (condition !== undefined && condition !== null) {
+    const ok = typeof condition === 'object'
+      && ['header', 'query', 'body'].includes(String(condition.type).toLowerCase())
+      && typeof condition.key === 'string' && condition.key
+      && condition.value !== undefined && condition.value !== null && String(condition.value) !== '';
+    if (!ok) return bad(res, 'condition must be {type: "header"|"query"|"body", key, value}');
   }
 
-  let pattern: string;
-  try {
-    pattern = new URL(url_pattern).pathname;
-  } catch {
-    pattern = (url_pattern as string).split('?')[0];
+  const db = getDb();
+  const userId = req.userId!;
+
+  // Optionally seed the response from a captured request (real response shape).
+  let seedStatus: number | undefined;
+  let seedHeaders: Record<string, string> | undefined;
+  let seedBody: string | undefined;
+  if (from_request_id !== undefined && from_request_id !== null) {
+    const log = db.prepare('SELECT * FROM request_logs WHERE id = ? AND user_id = ?')
+      .get(Number(from_request_id), userId) as Record<string, unknown> | undefined;
+    if (!log) {
+      res.status(404).json({ error: `Request ${from_request_id} not found` });
+      return;
+    }
+    seedStatus = Number(log['response_status']) || 200;
+    seedHeaders = stripHopHeaders(parseHeaders(log['response_headers'] as string));
+    seedBody = (log['response_body'] as string | null) ?? '';
   }
 
   const normalizedMethod: string | null = method ? String(method).toUpperCase() : null;
-  const normalizedMatchType = match_type || 'wildcard';
-  const status = Number.isInteger(response_status) ? response_status : 200;
-  const headers = response_headers ? JSON.stringify(response_headers) : '{"Content-Type":"application/json"}';
-  const body = response_body !== undefined ? (typeof response_body === 'string' ? response_body : JSON.stringify(response_body)) : '{}';
-  const isActive = enabled === false ? 0 : 1;
+  const { pattern, hadParams } = normalizeUrlPattern(url_pattern, match_type);
+  const normalizedMatchType: string = hadParams ? 'wildcard' : (match_type || 'wildcard');
+  const cType: string | null = condition ? String(condition.type).toLowerCase() : null;
+  const cKey: string | null = condition ? String(condition.key) : null;
+  const cValue: string | null = condition ? String(condition.value) : null;
 
-  const db = getDb();
-  const existing = db.prepare(
-    'SELECT * FROM mock_rules WHERE user_id = ? AND url_pattern = ? AND method IS ?'
-  ).get(req.userId!, pattern, normalizedMethod) as Record<string, unknown> | undefined;
+  const status: number = response_status ?? seedStatus ?? 200;
 
-  let ruleId: number | bigint;
-
-  if (!existing) {
-    const normalizedDelayMs = parseDelayMs(delay_ms ?? 0);
-    const ruleResult = db.prepare(`
-      INSERT INTO mock_rules (user_id, name, url_pattern, match_type, method, is_active, delay_ms, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
-    `).run(req.userId!, name || pattern, pattern, normalizedMatchType, normalizedMethod, isActive, normalizedDelayMs ?? 0);
-    ruleId = ruleResult.lastInsertRowid;
+  let body: string;
+  if (response_body !== undefined) {
+    body = typeof response_body === 'string' ? response_body : JSON.stringify(response_body);
   } else {
-    ruleId = existing['id'] as number;
-    db.prepare(
-      "UPDATE mock_rules SET is_active = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?"
-    ).run(enabled === undefined ? existing['is_active'] : isActive, ruleId);
+    body = seedBody ?? '{}';
   }
 
-  const versionResult = db.prepare(`
-    INSERT INTO mock_versions (rule_id, user_id, name, response_status, response_headers, response_body, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
-  `).run(ruleId, req.userId!, name || '200 OK', status, headers, body);
+  let headers: Record<string, string>;
+  if (response_headers !== undefined) {
+    headers = Object.fromEntries(Object.entries(response_headers).map(([k, v]) => [k, String(v)]));
+  } else if (seedHeaders) {
+    headers = seedHeaders;
+  } else {
+    // A bare non-JSON string body must not be labelled application/json.
+    let looksJson = true;
+    try { JSON.parse(body); } catch { looksJson = false; }
+    headers = { 'Content-Type': looksJson ? 'application/json' : 'text/plain; charset=utf-8' };
+  }
+  const headersJson = JSON.stringify(headers);
+  const isActive = enabled === false ? 0 : 1;
+  const versionName: string = version_name || name || String(status);
 
-  db.prepare('UPDATE mock_rules SET active_version_id = ? WHERE id = ?')
-    .run(versionResult.lastInsertRowid, ruleId);
+  const result = db.transaction(() => {
+    const existing = db.prepare(`
+      SELECT * FROM mock_rules
+      WHERE user_id = ? AND url_pattern = ? AND method IS ?
+        AND condition_field_type IS ? AND condition_field_key IS ? AND condition_field_value IS ?
+      ORDER BY id ASC LIMIT 1
+    `).get(userId, pattern, normalizedMethod, cType, cKey, cValue) as Record<string, unknown> | undefined;
 
-  const rule = db.prepare('SELECT * FROM mock_rules WHERE id = ?').get(ruleId) as Record<string, unknown>;
-  const versions = db.prepare(
-    'SELECT id, name, response_status FROM mock_versions WHERE rule_id = ? ORDER BY created_at ASC'
-  ).all(ruleId);
-  const activeVersion = db.prepare('SELECT * FROM mock_versions WHERE id = ?').get(rule['active_version_id']);
+    let ruleId: number | bigint;
+    if (!existing) {
+      const r = db.prepare(`
+        INSERT INTO mock_rules
+          (user_id, name, url_pattern, match_type, method, is_active, delay_ms,
+           condition_field_type, condition_field_key, condition_field_value, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+      `).run(userId, name || pattern, pattern, normalizedMatchType, normalizedMethod, isActive, delay ?? 0, cType, cKey, cValue);
+      ruleId = r.lastInsertRowid;
+    } else {
+      ruleId = existing['id'] as number;
+      // Only touch fields the caller actually sent.
+      db.prepare(`
+        UPDATE mock_rules
+        SET is_active = ?, name = ?, match_type = ?, delay_ms = ?, updated_at = datetime('now', '+8 hours')
+        WHERE id = ?
+      `).run(
+        enabled === undefined ? existing['is_active'] : isActive,
+        name ?? existing['name'],
+        match_type !== undefined || hadParams ? normalizedMatchType : existing['match_type'],
+        delay ?? existing['delay_ms'],
+        ruleId,
+      );
+    }
 
-  res.status(existing ? 200 : 201).json({ ...rule, version_count: versions.length, versions, active_version: activeVersion });
+    // Reuse an identical version instead of piling up duplicates.
+    const dup = db.prepare(`
+      SELECT id, name FROM mock_versions
+      WHERE rule_id = ? AND response_status = ? AND response_headers = ? AND response_body = ?
+      ORDER BY id DESC LIMIT 1
+    `).get(ruleId, status, headersJson, body) as { id: number; name: string } | undefined;
+
+    let versionId: number | bigint;
+    let reused = false;
+    if (dup) {
+      versionId = dup.id;
+      reused = true;
+      if ((version_name || name) && dup.name !== versionName) {
+        db.prepare("UPDATE mock_versions SET name = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?")
+          .run(versionName, versionId);
+      }
+    } else {
+      versionId = db.prepare(`
+        INSERT INTO mock_versions (rule_id, user_id, name, response_status, response_headers, response_body, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+      `).run(ruleId, userId, versionName, status, headersJson, body).lastInsertRowid;
+    }
+
+    // activate:false lets the caller stash an alternate scenario without switching to it
+    // (a brand-new rule always needs an active version to be servable).
+    const rule = db.prepare('SELECT active_version_id FROM mock_rules WHERE id = ?').get(ruleId) as { active_version_id: number | null };
+    if (activate !== false || !rule.active_version_id) {
+      db.prepare('UPDATE mock_rules SET active_version_id = ? WHERE id = ?').run(versionId, ruleId);
+    }
+    return { ruleId, versionId, created: !existing, reused };
+  })();
+
+  res.status(result.created ? 201 : 200).json({
+    ...ruleSummary(result.ruleId),
+    created: result.created,
+    version_reused: result.reused,
+    saved_version_id: Number(result.versionId),
+  });
+});
+
+// POST /api/mocks/switch-version - activate a version of a rule, addressed by pattern (for MCP tooling)
+router.post('/switch-version', requireAuth, (req: AuthRequest, res: Response): void => {
+  const { url_pattern, method, version_id, version_name } = req.body;
+  if (!url_pattern || (version_id === undefined && !version_name)) {
+    return bad(res, 'url_pattern and one of version_id / version_name are required');
+  }
+  const rules = findRulesByPattern(req.userId!, url_pattern, method ? String(method).toUpperCase() : undefined);
+  if (rules.length === 0) {
+    res.status(404).json({ error: 'No mock rule found for this url_pattern/method. Call upsert_mock first.' });
+    return;
+  }
+  if (rules.length > 1) {
+    res.status(409).json({
+      error: 'Multiple rules match; pass "method" (and use list_mocks to pick one).',
+      candidates: rules.map((r) => ({ id: r.id, method: r.method, match_type: r.match_type })),
+    });
+    return;
+  }
+  const rule = rules[0];
+  const db = getDb();
+  const versions = db.prepare('SELECT id, name, response_status FROM mock_versions WHERE rule_id = ? ORDER BY id ASC')
+    .all(rule.id) as { id: number; name: string; response_status: number }[];
+  const target = version_id !== undefined
+    ? versions.find((v) => v.id === Number(version_id))
+    : versions.slice().reverse().find((v) => v.name === version_name);
+  if (!target) {
+    res.status(404).json({ error: 'Version not found', available_versions: versions });
+    return;
+  }
+  db.prepare("UPDATE mock_rules SET active_version_id = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?")
+    .run(target.id, rule.id);
+  res.json({ ...ruleSummary(rule.id), switched_to: target });
+});
+
+// POST /api/mocks/delete-by-pattern - delete rule(s) matching pattern + method exactly (for MCP tooling)
+router.post('/delete-by-pattern', requireAuth, (req: AuthRequest, res: Response): void => {
+  const { url_pattern, method } = req.body;
+  if (!url_pattern) return bad(res, 'url_pattern is required');
+  // Deletion is strict: an omitted method means "the rule with no method restriction", not "all".
+  const rules = findRulesByPattern(req.userId!, url_pattern, method ? String(method).toUpperCase() : null);
+  if (rules.length === 0) {
+    res.status(404).json({ error: 'No mock rule found for this url_pattern/method.' });
+    return;
+  }
+  const del = getDb().prepare('DELETE FROM mock_rules WHERE id = ? AND user_id = ?');
+  for (const r of rules) del.run(r.id, req.userId!);
+  res.json({ success: true, deleted: rules.map((r) => ({ id: r.id, url_pattern: r.url_pattern, method: r.method })) });
 });
 
 export default router;

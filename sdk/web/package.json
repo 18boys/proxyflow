@@ -1,6 +1,6 @@
 {
   "name": "@proxyflow/web-sdk",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "proxyflow Web SDK — 浏览器 fetch 请求拦截与 Mock",
   "main": "proxyflow-web-sdk.js",
   "types": "proxyflow-web-sdk.d.ts",
@@ -10,8 +10,26 @@
   "files": [
     "proxyflow-web-sdk.js",
     "proxyflow-web-sdk.d.ts",
+    "proxyflow-relay.mjs",
+    "proxyflow-relay.cjs",
+    "proxyflow-relay.d.ts",
+    "relay.js",
+    "relay.mjs",
+    "relay.d.ts",
     "README.md"
   ],
+  "exports": {
+    ".": {
+      "types": "./proxyflow-web-sdk.d.ts",
+      "import": "./proxyflow-web-sdk.js",
+      "require": "./proxyflow-web-sdk.js"
+    },
+    "./relay": {
+      "types": "./proxyflow-relay.d.ts",
+      "import": "./proxyflow-relay.mjs",
+      "require": "./proxyflow-relay.cjs"
+    }
+  },
   "keywords": [
     "proxyflow",
     "web",

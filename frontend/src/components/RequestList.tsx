@@ -371,15 +371,19 @@ function RequestItem({
               onDisableMock();
             }}
             title="点击关闭此 Mock 规则"
-            className="group/mock px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 hover:bg-red-500/25 hover:text-red-300 hover:border-red-500/40 border border-emerald-500/30 transition-all shrink-0 flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            className="group/mock px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 hover:bg-red-500/25 hover:text-red-300 hover:border-red-500/40 border border-emerald-500/30 transition-colors shrink-0 flex items-center justify-center gap-1 cursor-pointer disabled:opacity-50"
           >
             {isDisabling ? (
               <RefreshCw size={10} className="animate-spin text-emerald-400" />
             ) : (
               <>
-                <span className="group-hover/mock:hidden">MOCK</span>
-                <span className="hidden group-hover/mock:inline">关闭</span>
-                <X size={10} className="opacity-70 group-hover/mock:opacity-100 group-hover/mock:scale-110 transition-transform" />
+                <span className="inline-grid grid-cols-1 grid-rows-1 place-items-center">
+                  <span className="invisible col-start-1 row-start-1 select-none pointer-events-none">MOCK</span>
+                  <span className="invisible col-start-1 row-start-1 select-none pointer-events-none">关闭</span>
+                  <span className="col-start-1 row-start-1 group-hover/mock:hidden">MOCK</span>
+                  <span className="col-start-1 row-start-1 hidden group-hover/mock:inline">关闭</span>
+                </span>
+                <X size={10} className="opacity-70 group-hover/mock:opacity-100 group-hover/mock:scale-110 transition-transform shrink-0" />
               </>
             )}
           </button>

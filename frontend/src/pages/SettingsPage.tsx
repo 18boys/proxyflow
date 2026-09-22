@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Plus, Save, Terminal, TestTube2, Trash2 } from 'lucide-react';
+import { AlertCircle, Check, CheckCircle2, Copy, Eye, EyeOff, KeyRound, Plus, Save, Sparkles, Terminal, TestTube2, Trash2 } from 'lucide-react';
 import { settingsApi, tokensApi } from '../api/client';
 import type { AiProtocol, AiSettings, ApiToken } from '../types';
 import { useStore } from '../store/useStore';
@@ -31,6 +31,8 @@ export default function SettingsPage() {
   const [revealedToken, setRevealedToken] = useState<string | null>(null);
   const [tokenMessage, setTokenMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [mcpTab, setMcpTab] = useState<'json' | 'prompt' | 'cli'>('json');
+  const [copiedType, setCopiedType] = useState<string | null>(null);
 
   useEffect(() => {
     settingsApi.getAi()
@@ -90,18 +92,45 @@ export default function SettingsPage() {
     }
   };
 
+  const handleCopyText = async (text: string, type: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedType(type);
+      setTimeout(() => setCopiedType((prev) => (prev === type ? null : prev)), 2000);
+    } catch {
+      // clipboard unavailable
+    }
+  };
+
+  const tokenPlaceholder = revealedToken ?? 'pf_xxxxxxxxxxxxxxxxxxxxxxxx';
+  const proxyflowUrl = window.location.origin;
+
   const mcpConfigExample = `{
   "mcpServers": {
     "proxyflow": {
       "command": "npx",
       "args": ["-y", "@proxyflow/mcp-server"],
       "env": {
-        "PROXYFLOW_URL": "${window.location.origin}",
-        "PROXYFLOW_TOKEN": "${revealedToken ?? 'pf_xxxxxxxxxxxxxxxxxxxxxxxx'}"
+        "PROXYFLOW_URL": "${proxyflowUrl}",
+        "PROXYFLOW_TOKEN": "${tokenPlaceholder}"
       }
     }
   }
 }`;
+
+  const claudeCliCommand = `claude mcp add proxyflow --env PROXYFLOW_URL="${proxyflowUrl}" --env PROXYFLOW_TOKEN="${tokenPlaceholder}" -- npx -y @proxyflow/mcp-server`;
+
+  const agentPrompt = `请帮我在当前环境/项目中配置 Proxyflow MCP 工具：
+
+MCP 配置信息如下（JSON 格式）：
+\`\`\`json
+${mcpConfigExample}
+\`\`\`
+
+如果是 Claude Code，也可以直接在终端执行：
+${claudeCliCommand}
+
+配置完成后，请帮我检查 MCP 连接状态并列出可用的 proxyflow 工具。`;
 
   const changeProtocol = (nextProtocol: AiProtocol) => {
     const currentDefault = DEFAULT_ENDPOINTS[protocol];
@@ -429,9 +458,107 @@ export default function SettingsPage() {
               </div>
             )}
 
-            <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-              <p className="text-[11px] text-slate-500 mb-1.5">MCP client configuration:</p>
-              <pre className="text-[11px] font-mono text-slate-400 overflow-x-auto whitespace-pre">{mcpConfigExample}</pre>
+            <div className="rounded-lg border border-slate-800 bg-slate-900/40 p-3 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800/80 pb-2">
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setMcpTab('json')}
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                      mcpTab === 'json'
+                        ? 'bg-cyan-500/20 text-cyan-400'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    JSON 配置
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMcpTab('prompt')}
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 ${
+                      mcpTab === 'prompt'
+                        ? 'bg-cyan-500/20 text-cyan-400'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    <Sparkles size={12} />
+                    Agent 提示词
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMcpTab('cli')}
+                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${
+                      mcpTab === 'cli'
+                        ? 'bg-cyan-500/20 text-cyan-400'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Claude CLI
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-1.5 ml-auto">
+                  {mcpTab !== 'prompt' && (
+                    <button
+                      type="button"
+                      onClick={() => handleCopyText(agentPrompt, 'agent-prompt-quick')}
+                      className="text-[11px] px-2.5 py-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 flex items-center gap-1 transition-colors font-medium"
+                      title="直接复制发给 AI Agent 的完整安装提示词"
+                    >
+                      <Sparkles size={11} />
+                      {copiedType === 'agent-prompt-quick' ? '已复制提示词' : '复制 Agent 提示词'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const textToCopy =
+                        mcpTab === 'json' ? mcpConfigExample : mcpTab === 'prompt' ? agentPrompt : claudeCliCommand;
+                      handleCopyText(textToCopy, mcpTab);
+                    }}
+                    className="btn-secondary text-[11px] py-1 px-2.5 flex items-center gap-1"
+                  >
+                    {copiedType === mcpTab ? (
+                      <Check size={12} className="text-emerald-400" />
+                    ) : (
+                      <Copy size={12} />
+                    )}
+                    {copiedType === mcpTab ? '已复制' : '复制'}
+                  </button>
+                </div>
+              </div>
+
+              {!revealedToken && (
+                <p className="text-[11px] text-amber-400/85 flex items-center gap-1">
+                  <AlertCircle size={11} className="shrink-0" />
+                  提示：生成 Token 后，此处的配置和提示词将自动填入真实 Token。
+                </p>
+              )}
+
+              {mcpTab === 'json' && (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-500">MCP client configuration (例如保存到 claude_desktop_config.json 或 Cursor MCP 设置):</p>
+                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-950/60 p-2.5 rounded border border-slate-800/60 overflow-x-auto whitespace-pre">{mcpConfigExample}</pre>
+                </div>
+              )}
+
+              {mcpTab === 'prompt' && (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-400">
+                    可直接复制以下提示词发给 Claude Code、Cursor、Windsurf、Cline 或 Antigravity 等 AI Agent：
+                  </p>
+                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-950/60 p-2.5 rounded border border-slate-800/60 overflow-x-auto whitespace-pre-wrap break-all">{agentPrompt}</pre>
+                </div>
+              )}
+
+              {mcpTab === 'cli' && (
+                <div className="space-y-1">
+                  <p className="text-[11px] text-slate-500">
+                    Claude Code 终端快速添加命令：
+                  </p>
+                  <pre className="text-[11px] font-mono text-slate-300 bg-slate-950/60 p-2.5 rounded border border-slate-800/60 overflow-x-auto whitespace-pre-wrap break-all">{claudeCliCommand}</pre>
+                </div>
+              )}
             </div>
           </div>
         </div>

@@ -21,6 +21,12 @@ import tokensRouter from './routes/tokens';
 const API_PORT = parseInt(process.env.PORT || '9000');
 const PROXY_PORT = parseInt(process.env.PROXY_PORT || '9001');
 
+// Express 4 does not catch rejections from async handlers; log instead of letting one bad
+// request take the whole process (API + proxy + WebSocket) down.
+process.on('unhandledRejection', (reason) => {
+  console.error('[fatal-guard] unhandledRejection:', reason);
+});
+
 // ── Initialize database & sync schema ────────────────────────────────────
 initializeDb();
 

@@ -4,6 +4,7 @@ import net from 'net';
 import { URL } from 'url';
 import { getDb } from './db';
 import { wsManager } from './websocket';
+import { safeStatus, parseHeaders } from './mockUtils';
 
 interface MockRule {
   id: number;
@@ -104,6 +105,20 @@ interface MockMatch {
   version: MockVersion;
 }
 
+/**
+ * Higher = more specific, so `/api/orders/42` wins over `/api/orders/*` regardless of creation order.
+ * Conditions > exact > wildcard (fewer `*` first) > regex; method-specific rules and longer literals break ties.
+ */
+function ruleSpecificity(rule: MockRule): number {
+  let score = 0;
+  if (rule.condition_field_type && rule.condition_field_key && rule.condition_field_value) score += 1000;
+  if (rule.method) score += 100;
+  if (rule.match_type === 'exact') score += 500;
+  else if (rule.match_type === 'wildcard') score += 300 - 10 * (rule.url_pattern.match(/\*/g)?.length ?? 0);
+  score += Math.min(rule.url_pattern.replace(/\*/g, '').length, 99) / 100;
+  return score;
+}
+
 export function findMatchingMock(
   userId: number,
   method: string,
@@ -112,9 +127,9 @@ export function findMatchingMock(
   requestBody: string | null
 ): MockMatch | null {
   const db = getDb();
-  const rules = db.prepare(
+  const rules = (db.prepare(
     'SELECT * FROM mock_rules WHERE user_id = ? AND is_active = 1'
-  ).all(userId) as MockRule[];
+  ).all(userId) as MockRule[]).sort((a, b) => ruleSpecificity(b) - ruleSpecificity(a) || b.id - a.id);
 
   for (const rule of rules) {
     if (rule.method && rule.method.toUpperCase() !== method.toUpperCase()) continue;
@@ -331,8 +346,9 @@ export function createProxyServer(): http.Server {
         await new Promise((resolve) => setTimeout(resolve, mockMatch.rule.delay_ms));
       }
 
-      const responseHeaders = JSON.parse(mockMatch.version.response_headers);
-      clientRes.writeHead(mockMatch.version.response_status, responseHeaders);
+      const responseHeaders = parseHeaders(mockMatch.version.response_headers);
+      const mockStatus = safeStatus(mockMatch.version.response_status);
+      clientRes.writeHead(mockStatus, responseHeaders);
       clientRes.end(mockMatch.version.response_body);
 
       const durationMs = Date.now() - startTime;
@@ -343,7 +359,7 @@ export function createProxyServer(): http.Server {
         url: targetUrl.toString(),
         requestHeaders,
         requestBody,
-        responseStatus: mockMatch.version.response_status,
+        responseStatus: mockStatus,
         responseHeaders,
         responseBody: mockMatch.version.response_body,
         durationMs,
