@@ -135,7 +135,7 @@ server.registerTool(
         value: z.string().min(1),
       }).optional().describe('Only serve this mock when the request has header/query param/JSON body field `key` equal to `value`. Lets one endpoint return different mocks per input. Rules with a condition take priority.'),
       from_request_id: z.number().int().optional()
-        .describe('Copy status, headers and body from a captured request (id from wait_for_request / list_recent_requests). Explicit response_* fields still override.'),
+        .describe('Copy status, headers and body from a captured request (request log id from wait_for_request / list_recent_requests). Explicit response_* fields still override.'),
     },
     annotations: WRITE_IDEMPOTENT,
   },
@@ -239,6 +239,8 @@ server.registerTool(
     title: 'List recent captured requests',
     description:
       'List the most recent requests captured by proxyflow (newest first) as compact summaries: id, time, method, url, status and whether it was MOCK or REAL. ' +
+      'Each row\'s `id` is a REQUEST LOG id — pass it to get_request / upsert_mock from_request_id. It is NOT a mock rule_id or version id (those come from list_mocks). ' +
+      'MOCK rows also carry `mock_id` (the rule that answered). ' +
       'Use it to see what the client actually called or to find failing calls (status="4xx"/"5xx"), then get_request for full details.',
     inputSchema: {
       url_contains: z.string().optional().describe('Substring the URL must contain, e.g. "/api/orders".'),
@@ -267,9 +269,10 @@ server.registerTool(
   {
     title: 'Get one captured request',
     description:
-      'Full details of one captured request by id (from list_recent_requests or wait_for_request): request/response headers (sensitive ones redacted) and bodies (truncated if large).',
+      'Full details of one captured request by its request log id (the `id` field from list_recent_requests or wait_for_request): request/response headers (sensitive ones redacted) and bodies (truncated if large). ' +
+      'Do NOT pass a mock rule_id or version id from list_mocks — those are different ids and will 404 or return an unrelated request.',
     inputSchema: {
-      id: z.number().int().describe('Request log id.'),
+      id: z.number().int().describe('Request log id — the `id` from list_recent_requests / wait_for_request (NOT a mock rule_id or version id from list_mocks).'),
       max_body_chars: maxBodyField,
     },
     annotations: READ_ONLY,

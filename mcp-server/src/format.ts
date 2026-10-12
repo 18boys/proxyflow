@@ -60,6 +60,7 @@ export function summariseLog(log: RawLog) {
     url: log.url,
     status: log.response_status,
     source: log.is_mocked ? 'MOCK' : 'REAL',
+    ...(log.is_mocked && log.mock_id != null ? { mock_id: log.mock_id } : {}),
     duration_ms: log.duration_ms,
   };
 }
