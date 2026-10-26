@@ -27,9 +27,9 @@ export default function Layout() {
 
     function connect() {
       if (destroyed) return;
-      // Use dynamic hostname to support non-localhost deployments
-      const wsHost = window.location.hostname;
-      const wsUrl = `ws://${wsHost}:9000/ws/dashboard?token=${token}`;
+      // Follow the page origin so HTTPS and local development use the same proxy.
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws/dashboard?token=${encodeURIComponent(token!)}`;
       const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 

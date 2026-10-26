@@ -147,3 +147,32 @@ cp backend/proxyflow.db backend/proxyflow-backup-$(date +%Y%m%d).db
 - Web 端（浏览器/H5）：[sdk/web/README.md](./sdk/web/README.md)
 - React Native：[sdk/react-native/README.md](./sdk/react-native/README.md)
 - 微信小程序：[sdk/miniprogram/README.md](./sdk/miniprogram/README.md)
+
+### HTTPS 域名接入
+
+以 `https://proxy.example.com` 为统一入口时，Dashboard 会自动连接
+`wss://proxy.example.com/ws/dashboard`，REST API 使用同源 `/api`。
+本地 HTTP 开发仍使用 `ws://`，并保留当前页面端口。
+
+域名入口需要同时转发 `/api/` 和 `/ws`，其中 `/ws` 必须支持 WebSocket Upgrade。
+可以将入口反向代理到 `127.0.0.1:3100`（现有 `proxy-server.js` 会继续转发 API 和 WebSocket），
+也可以在入口直接将这两个路径代理到 `127.0.0.1:9000`，参考 `nginx.conf`。
+TLS 可以在入口终止，内部仍通过 HTTP 连接后端；客户端不需要添加 `:9000`。
+
+Web、React Native 和小程序 SDK 已按传入的 `serverUrl` 发请求，无需为 HTTPS 修改 SDK 实现：
+
+```javascript
+proxyflow.init({
+  serverUrl: 'https://proxy.example.com',
+  sessionId: '你的 Session ID',
+});
+```
+
+`serverUrl` 使用域名根地址，不包含 `/dashboard` 或 `/api`。Web Dev Server / BFF relay
+和 MCP 接入则将 `PROXYFLOW_URL`（或 relay 的 `proxyflowUrl`）设置为同一 HTTPS 根地址。
+小程序还需要在平台后台将该 HTTPS 域名加入 request 合法域名。
+
+设备页面展示的配对二维码和地址会跟随页面域名。注意：后端 `/api/devices/pair` 和
+`/api/devices/:sessionId/pair-info` 返回的原始二维码与地址目前仍按 `HOST` / `PORT`
+生成 HTTP/WS 地址；直接消费这些 API 的客户端需要使用 HTTPS 根地址和对应的 WSS 地址。
+9001 端口的 HTTP 抓包代理是独立服务，不属于 SDK 的 HTTPS relay 入口。
