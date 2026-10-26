@@ -159,6 +159,33 @@ cp backend/proxyflow.db backend/proxyflow-backup-$(date +%Y%m%d).db
 也可以在入口直接将这两个路径代理到 `127.0.0.1:9000`，参考 `nginx.conf`。
 TLS 可以在入口终止，内部仍通过 HTTP 连接后端；客户端不需要添加 `:9000`。
 
+如果使用 Nginx，在实际处理 HTTPS 的 `server` 块中添加以下配置（后端与 Nginx
+运行在同一主机时可使用此地址；容器部署应替换为 Nginx 能访问的后端地址）：
+
+```nginx
+location /ws {
+    proxy_pass http://127.0.0.1:9000;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 86400;
+}
+```
+
+`proxy_pass` 后不加路径，保留 `/ws/dashboard` 和 `/ws/device`。若入口统一代理到
+`3100`，则该入口的代理配置同样需要保留上述 Upgrade / Connection 请求头。
+多层代理时，每一层都必须支持 WebSocket 转发。检查 Nginx 配置后重新加载：
+
+```bash
+nginx -t && nginx -s reload
+```
+
+浏览器 Network 的 WS 请求正常握手状态应为 `101 Switching Protocols`。
+如果返回 `200` 且响应内容是 `index.html`，说明请求进入了静态页面 / SPA 回退，
+需要检查实际入口的 `/ws` 路由和 Upgrade 转发；若已返回 `101` 后以 `1008` 关闭，
+则检查登录 token 是否有效。
+
 Web、React Native 和小程序 SDK 已按传入的 `serverUrl` 发请求，无需为 HTTPS 修改 SDK 实现：
 
 ```javascript
