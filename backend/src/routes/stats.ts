@@ -179,19 +179,29 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
       u.email,
       COALESCE(SUM(a.request_count), 0) as request_count,
       COALESCE(SUM(a.mocked_count), 0) as mocked_count,
+      COUNT(DISTINCT a.stat_date) as active_days,
       (SELECT COUNT(*) FROM mock_rules m WHERE m.user_id = u.id) as mock_rules_count,
+      (SELECT COUNT(*) FROM mock_rules m WHERE m.user_id = u.id AND m.is_active = 1) as active_rules_count,
+      (SELECT COUNT(*) FROM mock_versions v WHERE v.user_id = u.id) as versions_count,
       (SELECT COUNT(*) FROM device_sessions d WHERE d.user_id = u.id) as devices_count,
-      MAX(a.last_active_at) as last_active_at
+      COALESCE(
+        MAX(a.last_active_at),
+        (SELECT MAX(d.last_seen) FROM device_sessions d WHERE d.user_id = u.id),
+        u.created_at
+      ) as last_active_at
     FROM users u
     LEFT JOIN stats_daily_actors a ON a.user_id = u.id AND a.actor_type = 'user'
     GROUP BY u.id
-    ORDER BY request_count DESC
+    ORDER BY request_count DESC, last_active_at DESC
   `).all() as Array<{
     id: number;
     email: string;
     request_count: number;
     mocked_count: number;
+    active_days: number;
     mock_rules_count: number;
+    active_rules_count: number;
+    versions_count: number;
     devices_count: number;
     last_active_at: string | null;
   }>;

@@ -159,7 +159,7 @@ export default function CustomSelect({
               width: coords.width,
               zIndex: 9999,
             }}
-            className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl py-1 max-h-64 overflow-y-auto divide-y divide-slate-800/40"
+            className="bg-slate-900 border border-slate-700/80 rounded-xl shadow-xl p-1 max-h-64 overflow-y-auto space-y-0.5"
           >
             {options.length === 0 ? (
               <div className="px-3 py-2 text-xs text-slate-500 italic">No options</div>
@@ -176,7 +176,7 @@ export default function CustomSelect({
                       onChange(String(opt.value));
                       setOpen(false);
                     }}
-                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 text-left transition-colors ${
+                    className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-left transition-colors ${
                       size === 'xs' ? 'text-xs' : 'text-sm'
                     } ${mono ? 'font-mono' : ''} ${
                       isSelected

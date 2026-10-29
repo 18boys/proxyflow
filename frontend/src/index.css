@@ -150,6 +150,7 @@
   .light .bg-slate-950\/30 { background-color: rgb(248 250 252 / 0.8) !important; }
   .light .bg-slate-950\/20 { background-color: rgb(248 250 252 / 0.8) !important; }
 
+  .light .bg-slate-900\/95 { background-color: rgb(255 255 255 / 0.96) !important; }
   .light .bg-slate-900\/90 { background-color: rgb(255 255 255 / 0.95) !important; }
   .light .bg-slate-900\/80 { background-color: rgb(255 255 255 / 0.92) !important; }
   .light .bg-slate-900\/70 { background-color: theme('colors.white') !important; }
@@ -171,22 +172,39 @@
   .light .bg-slate-600\/60 { background-color: theme('colors.slate.300') !important; }
   .light .bg-slate-600 { background-color: theme('colors.slate.300') !important; }
 
-  /* Override borders & dividers */
-  .light .border-slate-800 { border-color: theme('colors.slate.200') !important; }
-  .light .border-slate-800\/80 { border-color: theme('colors.slate.200') !important; }
-  .light .border-slate-800\/60 { border-color: theme('colors.slate.200') !important; }
-  .light .border-slate-800\/50 { border-color: rgb(226 232 240 / 0.8) !important; }
-  .light .border-slate-700 { border-color: theme('colors.slate.200') !important; }
-  .light .border-slate-700\/80 { border-color: theme('colors.slate.200') !important; }
-  .light .border-slate-700\/70 { border-color: theme('colors.slate.200') !important; }
-  .light .border-slate-700\/60 { border-color: theme('colors.slate.200') !important; }
-  .light .border-slate-600 { border-color: theme('colors.slate.300') !important; }
+  /* Override borders & dividers with soft, light tones in Light Mode */
+  .light .border-slate-800 { border-color: rgb(226 232 240 / 0.85) !important; }
+  .light .border-slate-800\/80 { border-color: #f1f5f9 !important; }
+  .light .border-slate-800\/70 { border-color: #f1f5f9 !important; }
+  .light .border-slate-800\/60 { border-color: #f1f5f9 !important; }
+  .light .border-slate-800\/50 { border-color: #f1f5f9 !important; }
+  .light .border-slate-800\/40 { border-color: #f1f5f9 !important; }
+  .light .border-slate-700 { border-color: rgb(226 232 240 / 0.9) !important; }
+  .light .border-slate-700\/90 { border-color: rgb(226 232 240 / 0.9) !important; }
+  .light .border-slate-700\/80 { border-color: rgb(226 232 240 / 0.85) !important; }
+  .light .border-slate-700\/70 { border-color: #f1f5f9 !important; }
+  .light .border-slate-700\/60 { border-color: #f1f5f9 !important; }
+  .light .border-slate-700\/50 { border-color: #f1f5f9 !important; }
+  .light .border-slate-600 { border-color: rgb(203 213 225 / 0.85) !important; }
 
-  .light .divide-slate-800 > :not([hidden]) ~ :not([hidden]) {
-    border-color: theme('colors.slate.200') !important;
-  }
-  .light .divide-slate-700 > :not([hidden]) ~ :not([hidden]) {
-    border-color: theme('colors.slate.200') !important;
+  /* Preserve left accent borders on RequestList items when border-slate-800/50 is overridden */
+  .light .border-l-transparent { border-left-color: transparent !important; }
+  .light .border-l-cyan-500 { border-left-color: theme('colors.cyan.500') !important; }
+  .light .border-l-red-500 { border-left-color: theme('colors.red.500') !important; }
+  .light .border-l-red-500\/50 { border-left-color: rgb(239 68 68 / 0.5) !important; }
+  .light .border-l-emerald-500\/70 { border-left-color: rgb(16 185 129 / 0.7) !important; }
+
+  /* All divide-y and divide-x row dividers in Light Mode use very soft slate-100/slate-200 */
+  .light .divide-y > :not([hidden]) ~ :not([hidden]),
+  .light .divide-x > :not([hidden]) ~ :not([hidden]),
+  .light .divide-slate-800 > :not([hidden]) ~ :not([hidden]),
+  .light .divide-slate-800\/80 > :not([hidden]) ~ :not([hidden]),
+  .light .divide-slate-800\/60 > :not([hidden]) ~ :not([hidden]),
+  .light .divide-slate-800\/50 > :not([hidden]) ~ :not([hidden]),
+  .light .divide-slate-800\/40 > :not([hidden]) ~ :not([hidden]),
+  .light .divide-slate-700 > :not([hidden]) ~ :not([hidden]),
+  .light .divide-slate-700\/60 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #f1f5f9 !important;
   }
 
   /* Override texts */
@@ -204,6 +222,8 @@
   .light .text-emerald-300 { color: theme('colors.emerald.700') !important; }
   .light .text-purple-400 { color: theme('colors.purple.600') !important; }
   .light .text-purple-300 { color: theme('colors.purple.700') !important; }
+  .light .text-violet-400 { color: theme('colors.violet.600') !important; }
+  .light .text-violet-300 { color: theme('colors.violet.700') !important; }
   .light .text-blue-400 { color: theme('colors.blue.600') !important; }
   .light .text-blue-300 { color: theme('colors.blue.700') !important; }
   .light .text-amber-400 { color: theme('colors.amber.600') !important; }

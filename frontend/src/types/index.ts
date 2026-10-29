@@ -163,7 +163,10 @@ export interface StatsOverview {
     email: string;
     request_count: number;
     mocked_count: number;
+    active_days?: number;
     mock_rules_count: number;
+    active_rules_count?: number;
+    versions_count?: number;
     devices_count: number;
     last_active_at: string | null;
   }>;
