@@ -106,6 +106,69 @@ export interface ApiToken {
   revoked_at: string | null;
 }
 
+export interface StatsOverview {
+  summary: {
+    total_requests: number;
+    mocked_requests: number;
+    proxied_requests: number;
+    mock_hit_rate: number;
+    http_error_requests: number;
+    avg_duration_ms: number;
+    avg_mock_duration_ms: number;
+    avg_proxy_duration_ms: number;
+    active_days: number;
+    total_users: number;
+    total_devices: number;
+    online_devices: number;
+    total_mock_rules: number;
+    active_mock_rules: number;
+    total_mock_versions: number;
+    total_folders: number;
+    total_shared_links: number;
+    active_mcp_tokens: number;
+    estimated_hours_saved: number;
+    today_requests: number;
+    today_mocked: number;
+    today_users: number;
+    today_devices: number;
+  };
+  daily_trend: Array<{
+    day: string;
+    total_requests: number;
+    mocked_requests: number;
+    proxied_requests: number;
+    error_requests: number;
+    active_users: number;
+    active_devices: number;
+    avg_duration_ms: number;
+  }>;
+  method_distribution: Array<{
+    method: string;
+    count: number;
+  }>;
+  status_distribution: Array<{
+    category: string;
+    count: number;
+  }>;
+  top_endpoints: Array<{
+    endpoint: string;
+    method: string;
+    total_hits: number;
+    mocked_hits: number;
+    error_hits: number;
+    avg_ms: number | null;
+  }>;
+  user_leaderboard: Array<{
+    id: number;
+    email: string;
+    request_count: number;
+    mocked_count: number;
+    mock_rules_count: number;
+    devices_count: number;
+    last_active_at: string | null;
+  }>;
+}
+
 export type StatusColor = 'green' | 'orange' | 'red' | 'gray';
 
 export function getStatusColor(status: number | null): StatusColor {

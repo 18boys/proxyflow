@@ -4,6 +4,7 @@ import type { RequestLog } from '../types';
 import { Trash2, Filter, X, CheckSquare, Square, Search, RefreshCw, Zap } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { requestsApi } from '../api/client';
+import CustomSelect from './CustomSelect';
 
 interface RequestListProps {
   onSelectRequest: (id: number) => void;
@@ -102,9 +103,9 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
   };
 
   return (
-    <div className="flex flex-col h-full bg-slate-900/30">
+    <div className="flex flex-col h-full bg-slate-900">
       {/* Top Search & Filter Bar */}
-      <div className="p-3 border-b border-slate-800 space-y-2 bg-slate-900/60">
+      <div className="p-3 border-b border-slate-800 space-y-2.5 bg-slate-900">
         {/* Search input & actions */}
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -114,7 +115,7 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
               placeholder="Search URL, path or body..."
               value={filters.url}
               onChange={(e) => setFilter('url', e.target.value)}
-              className="w-full bg-slate-800/90 border border-slate-700 text-slate-200 text-xs rounded-lg pl-8 pr-7 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-500"
+              className="input-field w-full text-xs pl-8 pr-7 py-1.5"
             />
             {filters.url && (
               <button
@@ -159,7 +160,7 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
         </div>
 
         {/* Quick Filter Chips: Method & Status */}
-        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-1">
+        <div className="flex flex-wrap items-center justify-between gap-1.5 pt-0.5">
           {/* Method Chips */}
           <div className="flex items-center gap-1">
             {METHOD_CHIPS.map((m) => {
@@ -169,10 +170,10 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
                 <button
                   key={m}
                   onClick={() => setFilter('method', isSelected && val ? '' : val)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium transition-all ${
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-medium transition-all border ${
                     isSelected
-                      ? 'bg-cyan-600 text-white shadow-sm'
-                      : 'bg-slate-800/80 text-slate-400 hover:text-slate-200 hover:bg-slate-700'
+                      ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                      : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200 hover:bg-slate-700'
                   }`}
                 >
                   {m}
@@ -189,10 +190,10 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
                 <button
                   key={s.label}
                   onClick={() => setFilter('status', isSelected && s.value ? '' : s.value)}
-                  className={`px-2 py-0.5 rounded text-[11px] font-mono font-medium transition-all ${
+                  className={`px-2 py-0.5 rounded-md text-[11px] font-mono font-medium transition-all border ${
                     isSelected
-                      ? 'bg-cyan-600 text-white shadow-sm'
-                      : `bg-slate-800/80 ${s.color || 'text-slate-400'} hover:bg-slate-700 opacity-80 hover:opacity-100`
+                      ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                      : `bg-slate-800 border-slate-700 ${s.color || 'text-slate-400'} hover:bg-slate-700`
                   }`}
                 >
                   {s.label}
@@ -206,18 +207,21 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
         {showAdvanced && (
           <div className="pt-2 border-t border-slate-800/80 flex items-center gap-2">
             <span className="text-[11px] text-slate-500 shrink-0">Device:</span>
-            <select
+            <CustomSelect
+              size="xs"
+              className="flex-1"
               value={filters.sessionId}
-              onChange={(e) => setFilter('sessionId', e.target.value)}
-              className="flex-1 bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1"
-            >
-              <option value="">All Devices & Browsers</option>
-              {devices.map((d) => (
-                <option key={d.session_id} value={d.session_id}>
-                  {d.name || d.session_id.slice(0, 8)} {d.is_online ? '● Online' : ''}
-                </option>
-              ))}
-            </select>
+              onChange={(val) => setFilter('sessionId', val)}
+              options={[
+                { value: '', label: 'All Devices & Browsers' },
+                ...devices.map((d) => ({
+                  value: d.session_id,
+                  label: d.name || d.session_id.slice(0, 8),
+                  badge: d.is_online ? 'Online' : undefined,
+                  badgeColor: d.is_online ? 'bg-emerald-500/15 text-emerald-400' : undefined,
+                })),
+              ]}
+            />
           </div>
         )}
       </div>
@@ -237,9 +241,9 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
       )}
 
       {/* Request items count & list */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950/40 text-[11px] text-slate-500 border-b border-slate-800/50">
+      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-950/60 text-[11px] text-slate-500 border-b border-slate-800">
         <span>Showing {filteredRequests.length} of {requests.length} requests</span>
-        {hasActiveFilters && <span className="text-cyan-400">Filtered</span>}
+        {hasActiveFilters && <span className="text-cyan-400 font-medium">Filtered</span>}
       </div>
 
       <div className="flex-1 overflow-y-auto overflow-x-hidden min-w-0">

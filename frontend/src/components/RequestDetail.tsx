@@ -7,6 +7,7 @@ import { requestsApi, mocksApi } from '../api/client';
 import { useStore } from '../store/useStore';
 import { useDialog } from '../context/DialogContext';
 import MockEditor from './MockEditor';
+import CustomSelect from './CustomSelect';
 import { copyToClipboard } from '../utils/clipboard';
 
 interface RequestDetailProps {
@@ -372,17 +373,18 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
               className="min-w-56 flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
               autoFocus
             />
-            <select
-              value={mockFolderId ?? ''}
-              onChange={(event) => setMockFolderId(event.target.value ? Number(event.target.value) : null)}
-              aria-label="Mock folder"
-              className="bg-slate-900 border border-slate-600 text-slate-300 text-xs rounded px-2 py-1.5"
-            >
-              <option value="">Unfiled</option>
-              {mockFolders.map((folder) => (
-                <option key={folder.id} value={folder.id}>{folder.name}</option>
-              ))}
-            </select>
+            <div className="w-44">
+              <CustomSelect
+                size="xs"
+                value={mockFolderId ?? ''}
+                onChange={(val) => setMockFolderId(val ? Number(val) : null)}
+                ariaLabel="Mock folder"
+                options={[
+                  { value: '', label: 'Unfiled' },
+                  ...mockFolders.map((folder) => ({ value: folder.id, label: folder.name })),
+                ]}
+              />
+            </div>
             <button
               onClick={handleSaveMock}
               disabled={saving || !mockName.trim()}
@@ -845,15 +847,18 @@ function EditSendModal({ initialLog, onClose }: EditSendModalProps) {
 
           {/* URL & Method */}
           <div className="flex gap-2">
-            <select
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              className="input-field text-xs font-bold font-mono w-28 shrink-0"
-            >
-              {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
+            <div className="w-28 shrink-0">
+              <CustomSelect
+                size="xs"
+                mono
+                value={method}
+                onChange={(val) => setMethod(val)}
+                options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((m) => ({
+                  value: m,
+                  label: m,
+                }))}
+              />
+            </div>
             <input
               type="text"
               value={url}

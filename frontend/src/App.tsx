@@ -9,6 +9,7 @@ import MocksPage from './pages/MocksPage';
 import DevicesPage from './pages/DevicesPage';
 import SharedRequestPage from './pages/SharedRequestPage';
 import SettingsPage from './pages/SettingsPage';
+import AnalyticsPage from './pages/AnalyticsPage';
 import { authApi } from './api/client';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="mocks" element={<MocksPage />} />
           <Route path="rules" element={<Navigate to="/mocks" replace />} />
           <Route path="devices" element={<DevicesPage />} />
+          <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

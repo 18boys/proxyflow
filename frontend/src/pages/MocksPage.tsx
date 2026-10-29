@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
 import {
   Plus, Search, Download, Upload, Trash2, Edit2, Bot, Sparkles,
-  Folder, FolderPlus, ToggleLeft, ToggleRight, GitBranch, ChevronDown
+  Folder, FolderPlus, ToggleLeft, ToggleRight, GitBranch
 } from 'lucide-react';
 import type { MockFolder, MockRule } from '../types';
 import { mocksApi, rulesApi, streamAiRequest } from '../api/client';
 import { useDialog } from '../context/DialogContext';
 import MockEditor from '../components/MockEditor';
+import CustomSelect from '../components/CustomSelect';
 
 export default function MocksPage() {
   const { confirm, toast } = useDialog();
@@ -173,8 +174,8 @@ export default function MocksPage() {
   };
 
   return (
-    <div className="h-full flex flex-col">
-      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-slate-800 bg-slate-900/30">
+    <div className="h-full flex flex-col bg-slate-950">
+      <div className="flex flex-wrap items-center justify-between gap-3 px-6 py-4 border-b border-slate-800 bg-slate-900">
         <div>
           <h1 className="text-lg font-semibold text-slate-100">Mock Studio</h1>
           <p className="text-xs text-slate-500 mt-0.5">{mockCount} active · {rules.length} configured</p>
@@ -183,8 +184,10 @@ export default function MocksPage() {
           <button
             onClick={() => handleGlobalMode('proxy')}
             disabled={globalMode !== null}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 disabled:opacity-60 ${
-              globalMode === 'proxy' ? 'bg-blue-500 text-white' : 'bg-blue-500/20 text-blue-400 hover:bg-blue-500/30'
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 border transition-colors disabled:opacity-60 ${
+              globalMode === 'proxy'
+                ? 'bg-blue-600 text-white border-blue-600'
+                : 'bg-blue-500/15 text-blue-400 border-blue-500/20 hover:bg-blue-500/25'
             }`}
           >
             <GitBranch size={13} /> All Proxy
@@ -192,28 +195,30 @@ export default function MocksPage() {
           <button
             onClick={() => handleGlobalMode('mock')}
             disabled={globalMode !== null}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 disabled:opacity-60 ${
-              globalMode === 'mock' ? 'bg-emerald-500 text-white' : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium flex items-center gap-1.5 border transition-colors disabled:opacity-60 ${
+              globalMode === 'mock'
+                ? 'bg-emerald-600 text-white border-emerald-600'
+                : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/25'
             }`}
           >
             <ToggleRight size={13} /> All Mock
           </button>
           <button
             onClick={() => setShowAiGenerate(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 text-sm transition-colors"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/20 text-purple-400 text-sm font-medium transition-colors"
           >
             <Sparkles size={14} />
             AI Generate
           </button>
-          <button onClick={handleExport} className="btn-secondary text-sm flex items-center gap-1.5">
+          <button onClick={handleExport} className="btn-secondary text-sm py-1.5 flex items-center gap-1.5">
             <Download size={14} /> Export
           </button>
-          <button onClick={() => fileInputRef.current?.click()} className="btn-secondary text-sm flex items-center gap-1.5">
+          <button onClick={() => fileInputRef.current?.click()} className="btn-secondary text-sm py-1.5 flex items-center gap-1.5">
             <Upload size={14} /> Import
           </button>
           <button
             onClick={() => { setEditingRule(null); setShowEditor(true); }}
-            className="btn-primary text-sm flex items-center gap-1.5"
+            className="btn-primary text-sm py-1.5 flex items-center gap-1.5"
           >
             <Plus size={14} /> New Rule
           </button>
@@ -222,21 +227,21 @@ export default function MocksPage() {
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        <aside className="w-56 shrink-0 border-r border-slate-800 bg-slate-900/20 p-3 overflow-y-auto">
+        <aside className="w-56 shrink-0 border-r border-slate-800 bg-slate-900 p-3 overflow-y-auto">
           <div className="flex items-center justify-between px-2 mb-2">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Folders</span>
             <button
               onClick={() => setShowNewFolder((visible) => !visible)}
               title="New folder"
               aria-label="New folder"
-              className="p-1 rounded text-slate-500 hover:text-cyan-400 hover:bg-slate-800"
+              className="p-1 rounded-md text-slate-500 hover:text-cyan-400 hover:bg-slate-800 transition-colors"
             >
               <FolderPlus size={14} />
             </button>
           </div>
           <div className="space-y-1">
             {showNewFolder && (
-              <div className="p-2 mb-2 rounded-lg border border-slate-700 bg-slate-800/60 space-y-2">
+              <div className="p-2.5 mb-2 rounded-xl border border-slate-700 bg-slate-800/60 space-y-2">
                 <input
                   value={newFolderName}
                   onChange={(event) => setNewFolderName(event.target.value)}
@@ -256,7 +261,7 @@ export default function MocksPage() {
                   <button
                     onClick={handleCreateFolder}
                     disabled={!newFolderName.trim()}
-                    className="px-2 py-1 rounded bg-cyan-600 text-[11px] text-white disabled:opacity-40"
+                    className="px-2.5 py-1 rounded-md bg-cyan-600 text-[11px] font-medium text-white disabled:opacity-40"
                   >
                     Create
                   </button>
@@ -265,20 +270,28 @@ export default function MocksPage() {
             )}
             <button
               onClick={() => setSelectedFolder('all')}
-              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm ${selectedFolder === 'all' ? 'bg-cyan-500/15 text-cyan-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                selectedFolder === 'all'
+                  ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20'
+                  : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-slate-200'
+              }`}
             >
-              <Folder size={14} /> <span className="flex-1 text-left">All Mocks</span><span className="text-xs opacity-60">{rules.length}</span>
+              <Folder size={14} /> <span className="flex-1 text-left">All Mocks</span><span className="text-xs opacity-70 font-mono">{rules.length}</span>
             </button>
             <button
               onClick={() => setSelectedFolder('unfiled')}
-              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm ${selectedFolder === 'unfiled' ? 'bg-cyan-500/15 text-cyan-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+              className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                selectedFolder === 'unfiled'
+                  ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20'
+                  : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-slate-200'
+              }`}
             >
-              <Folder size={14} /> <span className="flex-1 text-left">Unfiled</span><span className="text-xs opacity-60">{rules.filter((rule) => rule.folder_id === null).length}</span>
+              <Folder size={14} /> <span className="flex-1 text-left">Unfiled</span><span className="text-xs opacity-70 font-mono">{rules.filter((rule) => rule.folder_id === null).length}</span>
             </button>
             {folders.map((folder) => (
-              <div key={folder.id} className="group flex items-center">
+              <div key={folder.id} className="group flex items-center gap-0.5">
                 {renamingFolderId === folder.id ? (
-                  <div className="w-full p-2 rounded-lg border border-slate-700 bg-slate-800/60 space-y-2">
+                  <div className="w-full p-2.5 rounded-xl border border-slate-700 bg-slate-800/60 space-y-2">
                     <input
                       value={renameFolderName}
                       onChange={(event) => setRenameFolderName(event.target.value)}
@@ -289,24 +302,28 @@ export default function MocksPage() {
                     />
                     <div className="flex justify-end gap-1.5">
                       <button onClick={() => setRenamingFolderId(null)} className="px-2 py-1 text-[11px] text-slate-400">Cancel</button>
-                      <button onClick={() => handleRenameFolder(folder)} className="px-2 py-1 rounded bg-cyan-600 text-[11px] text-white">Save</button>
+                      <button onClick={() => handleRenameFolder(folder)} className="px-2.5 py-1 rounded-md bg-cyan-600 text-[11px] font-medium text-white">Save</button>
                     </div>
                   </div>
                 ) : (
                   <>
                     <button
                       onClick={() => setSelectedFolder(folder.id)}
-                      className={`min-w-0 flex-1 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm ${selectedFolder === folder.id ? 'bg-cyan-500/15 text-cyan-400' : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'}`}
+                      className={`min-w-0 flex-1 flex items-center gap-2 px-2.5 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                        selectedFolder === folder.id
+                          ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20'
+                          : 'text-slate-400 border-transparent hover:bg-slate-800 hover:text-slate-200'
+                      }`}
                     >
                       <Folder size={14} className="shrink-0" />
                       <span className="flex-1 text-left truncate">{folder.name}</span>
-                      <span className="text-xs opacity-60">{folder.mock_count}</span>
+                      <span className="text-xs opacity-70 font-mono">{folder.mock_count}</span>
                     </button>
                     <button
                       onClick={() => { setRenamingFolderId(folder.id); setRenameFolderName(folder.name); }}
                       title={`Rename ${folder.name}`}
                       aria-label={`Rename ${folder.name}`}
-                      className="p-1 text-slate-600 hover:text-slate-300 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      className="p-1 rounded text-slate-500 hover:text-slate-200 opacity-0 group-hover:opacity-100 focus:opacity-100"
                     >
                       <Edit2 size={11} />
                     </button>
@@ -314,7 +331,7 @@ export default function MocksPage() {
                       onClick={() => handleDeleteFolder(folder)}
                       title={`Delete ${folder.name}`}
                       aria-label={`Delete ${folder.name}`}
-                      className="p-1 text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 focus:opacity-100"
+                      className="p-1 rounded text-slate-500 hover:text-red-400 opacity-0 group-hover:opacity-100 focus:opacity-100"
                     >
                       <Trash2 size={11} />
                     </button>
@@ -326,7 +343,7 @@ export default function MocksPage() {
         </aside>
 
         <section className="flex-1 min-w-0 flex flex-col">
-          <div className="px-6 py-3 border-b border-slate-800">
+          <div className="px-6 py-3 border-b border-slate-800 bg-slate-900">
             <div className="relative max-w-md">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
               <input
@@ -334,7 +351,7 @@ export default function MocksPage() {
                 placeholder="Search by name or URL..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="input-field w-full pl-9 text-sm"
+                className="input-field w-full pl-9 text-sm py-1.5"
               />
             </div>
           </div>
@@ -443,20 +460,28 @@ function MockRuleCard({ rule, toggling, onToggle, onVersionChange, onEdit, onDel
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <div className="relative min-w-40">
-            <select
+          <div className="min-w-44 max-w-64">
+            <CustomSelect
+              size="xs"
               value={rule.active_version_id ?? ''}
-              onChange={(event) => onVersionChange(Number(event.target.value))}
+              onChange={(val) => onVersionChange(Number(val))}
               disabled={!rule.versions?.length}
-              aria-label={`Active version for ${rule.name}`}
-              className="w-full appearance-none bg-slate-800 border border-slate-700 text-slate-300 text-xs rounded-lg py-1.5 pl-2 pr-6 disabled:opacity-50"
-            >
-              {!rule.versions?.length && <option value="">No versions</option>}
-              {rule.versions?.map((version) => (
-                <option key={version.id} value={version.id}>{version.name} ({version.response_status})</option>
-              ))}
-            </select>
-            <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
+              ariaLabel={`Active version for ${rule.name}`}
+              placeholder="No versions"
+              options={
+                rule.versions?.map((version) => ({
+                  value: version.id,
+                  label: version.name,
+                  badge: String(version.response_status),
+                  badgeColor:
+                    version.response_status >= 200 && version.response_status < 300
+                      ? 'bg-emerald-500/15 text-emerald-400'
+                      : version.response_status >= 400
+                        ? 'bg-red-500/15 text-red-400'
+                        : 'bg-slate-700 text-slate-300',
+                })) || []
+              }
+            />
           </div>
           <button
             onClick={onToggle}
@@ -592,24 +617,23 @@ function AiGenerateModal({ onClose, onGenerated, folders, defaultFolderId }: AiG
             </div>
             <div>
               <label className="block text-xs text-slate-400 mb-1">Method</label>
-              <select value={method} onChange={(e) => setMethod(e.target.value)} className="input-field w-full text-sm">
-                {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
+              <CustomSelect
+                value={method}
+                onChange={(val) => setMethod(val)}
+                mono
+                options={['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => ({ value: m, label: m }))}
+              />
             </div>
             <div className="col-span-3">
               <label className="block text-xs text-slate-400 mb-1">Save to Folder</label>
-              <select
+              <CustomSelect
                 value={folderId ?? ''}
-                onChange={(event) => setFolderId(event.target.value ? Number(event.target.value) : null)}
-                className="input-field w-full text-sm"
-              >
-                <option value="">Unfiled</option>
-                {folders.map((folder) => (
-                  <option key={folder.id} value={folder.id}>{folder.name}</option>
-                ))}
-              </select>
+                onChange={(val) => setFolderId(val ? Number(val) : null)}
+                options={[
+                  { value: '', label: 'Unfiled' },
+                  ...folders.map((folder) => ({ value: folder.id, label: folder.name })),
+                ]}
+              />
             </div>
           </div>
 

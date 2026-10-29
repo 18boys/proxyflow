@@ -1,11 +1,13 @@
 import { useEffect, useState, useRef } from 'react';
-import { Bot, X, Brain, Users, Activity } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Bot, X, Brain, Users, Activity, BarChart3 } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { requestsApi, statsApi, streamAiRequest } from '../api/client';
 import RequestList from '../components/RequestList';
 import RequestDetail from '../components/RequestDetail';
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const {
     setRequests, selectedRequestId, setSelectedRequestId,
     selectedForDiagnosis, clearDiagnosisSelection,
@@ -85,23 +87,32 @@ export default function DashboardPage() {
       <div className="flex-1 flex flex-col h-full border-r border-slate-800 min-w-0">
         {/* Stats bar */}
         {todayStats && (
-          <div className="flex items-center gap-3 px-4 py-2 border-b border-slate-800 bg-slate-900/60">
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <Activity size={12} className="text-cyan-400" />
-              <span className="text-slate-500">今日请求</span>
-              <span className="font-mono font-semibold text-cyan-300">{todayStats.today_requests.toLocaleString()}</span>
+          <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800 bg-slate-900">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                <Activity size={12} className="text-cyan-400" />
+                <span className="text-slate-500">今日请求</span>
+                <span className="font-mono font-semibold text-cyan-300">{todayStats.today_requests.toLocaleString()}</span>
+              </div>
+              <div className="w-px h-3 bg-slate-800" />
+              <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                <Users size={12} className="text-emerald-400" />
+                <span className="text-slate-500">今日在线</span>
+                <span className="font-mono font-semibold text-emerald-300">{todayStats.today_online_users}</span>
+                <span className="text-slate-600">人</span>
+              </div>
             </div>
-            <div className="w-px h-3 bg-slate-700" />
-            <div className="flex items-center gap-1.5 text-xs text-slate-400">
-              <Users size={12} className="text-emerald-400" />
-              <span className="text-slate-500">今日在线</span>
-              <span className="font-mono font-semibold text-emerald-300">{todayStats.today_online_users}</span>
-              <span className="text-slate-600">人</span>
-            </div>
+            <button
+              onClick={() => navigate('/analytics')}
+              className="flex items-center gap-1 text-[11px] font-medium text-cyan-400 hover:text-cyan-300 transition-colors"
+            >
+              <BarChart3 size={12} />
+              查看数据统计 →
+            </button>
           </div>
         )}
         {/* Column header */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800 bg-slate-900">
           <h2 className="text-sm font-semibold text-slate-200">Requests</h2>
           {selectedForDiagnosis.length > 0 && (
             <button

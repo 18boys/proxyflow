@@ -113,6 +113,14 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'proxyflow-storage',
+      version: 2,
+      migrate: (persistedState: unknown, version: number) => {
+        const state = (persistedState as Record<string, unknown>) || {};
+        if (version < 2) {
+          return { ...state, theme: 'dark' };
+        }
+        return state;
+      },
       partialize: (state) => ({
         user: state.user,
         token: state.token,

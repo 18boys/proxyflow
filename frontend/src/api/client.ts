@@ -161,6 +161,7 @@ export const requestsApi = {
 // ── Stats ─────────────────────────────────────────────────────────────────
 export const statsApi = {
   today: () => get<{ today_requests: number; today_online_users: number }>('/stats/today'),
+  overview: (days = 30) => get<import('../types').StatsOverview>(`/stats/overview?days=${days}`),
 };
 
 // ── Mocks ─────────────────────────────────────────────────────────────────
@@ -293,6 +294,7 @@ export const tokensApi = {
 // ── Settings ──────────────────────────────────────────────────────────────
 export const settingsApi = {
   get: () => get<{ exclusion_domains: string[] }>('/settings'),
+  getExclusions: () => get<{ exclusion_domains: string[] }>('/settings'),
   updateExclusions: (domains: string[]) =>
     put<{ exclusion_domains: string[] }>('/settings/exclusions', { domains }),
   getAi: () => get<import('../types').AiSettings>('/settings/ai'),

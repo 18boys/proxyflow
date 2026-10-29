@@ -5,6 +5,7 @@ import type { MockFolder, MockRule, MockVersion } from '../types';
 import { mocksApi, streamAiRequest } from '../api/client';
 import { useDialog } from '../context/DialogContext';
 import JsonViewer from './JsonViewer';
+import CustomSelect from './CustomSelect';
 
 interface MockEditorProps {
   rule?: MockRule | null;
@@ -399,43 +400,40 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
 
               <div>
                 <label className="block text-xs font-medium text-slate-400 mb-1">Folder</label>
-                <select
+                <CustomSelect
                   value={folderId ?? ''}
-                  onChange={(e) => setFolderId(e.target.value ? Number(e.target.value) : null)}
-                  className="input-field w-full text-sm"
-                >
-                  <option value="">Unfiled</option>
-                  {folders.map((folder) => (
-                    <option key={folder.id} value={folder.id}>{folder.name}</option>
-                  ))}
-                </select>
+                  onChange={(val) => setFolderId(val ? Number(val) : null)}
+                  options={[
+                    { value: '', label: 'Unfiled' },
+                    ...folders.map((folder) => ({ value: folder.id, label: folder.name })),
+                  ]}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1">Match Type</label>
-                  <select
+                  <CustomSelect
                     value={matchType}
-                    onChange={(e) => setMatchType(e.target.value as 'exact' | 'wildcard' | 'regex')}
-                    className="input-field w-full text-sm"
-                  >
-                    <option value="exact">Exact</option>
-                    <option value="wildcard">Wildcard (*)</option>
-                    <option value="regex">Regex</option>
-                  </select>
+                    onChange={(val) => setMatchType(val as 'exact' | 'wildcard' | 'regex')}
+                    options={[
+                      { value: 'exact', label: 'Exact' },
+                      { value: 'wildcard', label: 'Wildcard (*)' },
+                      { value: 'regex', label: 'Regex' },
+                    ]}
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-slate-400 mb-1">Method</label>
-                  <select
+                  <CustomSelect
                     value={method}
-                    onChange={(e) => setMethod(e.target.value)}
-                    className="input-field w-full text-sm"
-                  >
-                    <option value="">Any Method</option>
-                    {['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => (
-                      <option key={m} value={m}>{m}</option>
-                    ))}
-                  </select>
+                    onChange={(val) => setMethod(val)}
+                    mono
+                    options={[
+                      { value: '', label: 'Any Method' },
+                      ...['GET', 'POST', 'PUT', 'PATCH', 'DELETE'].map((m) => ({ value: m, label: m })),
+                    ]}
+                  />
                 </div>
               </div>
             </div>
@@ -444,16 +442,17 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
             <div className="pt-2 border-t border-slate-800/80 space-y-2">
               <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">Condition Mock (条件匹配，可选)</span>
               <div className="grid grid-cols-3 gap-2">
-                <select
+                <CustomSelect
+                  size="xs"
                   value={condType}
-                  onChange={(e) => setCondType(e.target.value)}
-                  className="input-field text-xs"
-                >
-                  <option value="">No Condition</option>
-                  <option value="query">Query (?key=value)</option>
-                  <option value="header">Header Field</option>
-                  <option value="body">Body JSON Field</option>
-                </select>
+                  onChange={(val) => setCondType(val)}
+                  options={[
+                    { value: '', label: 'No Condition' },
+                    { value: 'query', label: 'Query (?k=v)' },
+                    { value: 'header', label: 'Header Field' },
+                    { value: 'body', label: 'Body JSON' },
+                  ]}
+                />
                 <input
                   value={condKey}
                   onChange={(e) => setCondKey(e.target.value)}

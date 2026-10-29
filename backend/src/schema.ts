@@ -131,4 +131,43 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     revoked_at:   'TEXT',
     created_at:   "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },
+
+  // ── 历史统计归档表（每次请求实时增量更新，清理抓包明细不影响历史统计） ──
+  stats_daily_rollup: {
+    stat_date:            'TEXT PRIMARY KEY',
+    total_requests:       'INTEGER NOT NULL DEFAULT 0',
+    mocked_requests:      'INTEGER NOT NULL DEFAULT 0',
+    proxied_requests:     'INTEGER NOT NULL DEFAULT 0',
+    error_requests:       'INTEGER NOT NULL DEFAULT 0',
+    total_duration_ms:    'INTEGER NOT NULL DEFAULT 0',
+    duration_count:       'INTEGER NOT NULL DEFAULT 0',
+    mock_duration_ms:     'INTEGER NOT NULL DEFAULT 0',
+    mock_duration_count:  'INTEGER NOT NULL DEFAULT 0',
+    proxy_duration_ms:    'INTEGER NOT NULL DEFAULT 0',
+    proxy_duration_count: 'INTEGER NOT NULL DEFAULT 0',
+    updated_at:           "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
+
+  stats_daily_actors: {
+    id:             'INTEGER PRIMARY KEY AUTOINCREMENT',
+    stat_date:      'TEXT NOT NULL',
+    actor_type:     'TEXT NOT NULL',
+    actor_key:      'TEXT NOT NULL',
+    user_id:        'INTEGER',
+    request_count:  'INTEGER NOT NULL DEFAULT 0',
+    mocked_count:   'INTEGER NOT NULL DEFAULT 0',
+    last_active_at: "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
+
+  stats_endpoint_rollup: {
+    id:                'INTEGER PRIMARY KEY AUTOINCREMENT',
+    endpoint:          'TEXT NOT NULL',
+    method:            'TEXT NOT NULL',
+    total_hits:        'INTEGER NOT NULL DEFAULT 0',
+    mocked_hits:       'INTEGER NOT NULL DEFAULT 0',
+    error_hits:        'INTEGER NOT NULL DEFAULT 0',
+    total_duration_ms: 'INTEGER NOT NULL DEFAULT 0',
+    duration_count:    'INTEGER NOT NULL DEFAULT 0',
+    last_hit_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
 };

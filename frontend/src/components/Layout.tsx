@@ -1,8 +1,9 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import {
-  Activity, Layers, Smartphone, LogOut, Moon, Sun, Zap, Settings
+  Activity, Layers, Smartphone, LogOut, Moon, Sun, Zap, Settings, BarChart3
 } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { useDialog } from '../context/DialogContext';
 import { useEffect, useRef } from 'react';
 import type { RequestLog } from '../types';
 
@@ -10,11 +11,13 @@ const NAV_ITEMS = [
   { to: '/dashboard', icon: Activity, label: 'Monitor' },
   { to: '/mocks', icon: Layers, label: 'Mocks' },
   { to: '/devices', icon: Smartphone, label: 'Devices' },
+  { to: '/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
 export default function Layout() {
   const { user, token, logout, theme, toggleTheme, prependRequest, updateDeviceStatus } = useStore();
+  const { confirm } = useDialog();
   const navigate = useNavigate();
   const wsRef = useRef<WebSocket | null>(null);
 
@@ -74,22 +77,30 @@ export default function Layout() {
     };
   }, [token, prependRequest, updateDeviceStatus]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const ok = await confirm({
+      title: '退出登录',
+      message: `确定要退出当前账号 ${user?.email ? `(${user.email}) ` : ''}吗？`,
+      confirmText: '退出登录',
+      cancelText: '取消',
+      type: 'warning',
+    });
+    if (!ok) return;
     logout();
     navigate('/login');
   };
 
   return (
-    <div className={`flex h-screen overflow-hidden ${theme === 'light' ? 'bg-slate-100' : 'bg-slate-950'}`}>
+    <div className={`flex h-screen overflow-hidden ${theme === 'light' ? 'bg-slate-50' : 'bg-slate-950'}`}>
       {/* Sidebar */}
       <aside className="w-16 lg:w-56 flex flex-col bg-slate-900 border-r border-slate-800 shrink-0">
         {/* Logo */}
         <div className="h-14 flex items-center px-3 lg:px-4 border-b border-slate-800">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shrink-0">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-500 to-blue-600 flex items-center justify-center shrink-0 shadow-sm shadow-cyan-500/20">
               <Zap size={16} className="text-white" />
             </div>
-            <span className="hidden lg:block font-bold text-slate-100 text-sm truncate">proxyflow</span>
+            <span className="hidden lg:block font-bold text-slate-100 text-sm tracking-tight truncate">proxyflow</span>
           </div>
         </div>
 
@@ -100,10 +111,10 @@ export default function Layout() {
               key={to}
               to={to}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors text-sm font-medium
+                `flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all text-sm font-medium
                 ${isActive
-                  ? 'bg-cyan-500/20 text-cyan-400'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                  ? 'bg-cyan-500/15 text-cyan-400 shadow-sm shadow-cyan-500/5 border border-cyan-500/20'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800 border border-transparent'
                 }`
               }
             >

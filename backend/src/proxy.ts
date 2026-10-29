@@ -2,7 +2,7 @@ import http from 'http';
 import https from 'https';
 import net from 'net';
 import { URL } from 'url';
-import { getDb } from './db';
+import { getDb, recordRequestStats } from './db';
 import { wsManager } from './websocket';
 import { safeStatus, parseHeaders } from './mockUtils';
 
@@ -164,7 +164,10 @@ function scheduleAsyncCleanup(userId: number | null) {
   setImmediate(() => {
     try {
       const db = getDb();
-      // Count total records for this user / anonymous
+      // 1. Delete raw request_logs older than 7 days (aggregated metrics are safely archived in stats_*_rollup)
+      db.prepare("DELETE FROM request_logs WHERE created_at < datetime('now', '+8 hours', '-7 days')").run();
+
+      // 2. Count total records for this user / anonymous and cap at 1000 rows
       const countResult = (userId !== null
         ? db.prepare('SELECT COUNT(*) AS total FROM request_logs WHERE user_id = ?').get(userId)
         : db.prepare('SELECT COUNT(*) AS total FROM request_logs WHERE user_id IS NULL').get()
@@ -210,6 +213,7 @@ export async function saveRequestLog(data: {
   ttfbMs?: number;
 }): Promise<number> {
   const db = getDb();
+  const parsedPath = new URL(data.url.startsWith('http') ? data.url : `http://x${data.url}`).pathname;
   const result = db.prepare(`
     INSERT INTO request_logs
       (user_id, session_id, method, url, path, request_headers, request_body,
@@ -221,7 +225,7 @@ export async function saveRequestLog(data: {
     data.sessionId,
     data.method,
     data.url,
-    new URL(data.url.startsWith('http') ? data.url : `http://x${data.url}`).pathname,
+    parsedPath,
     JSON.stringify(data.requestHeaders),
     data.requestBody,
     data.responseStatus,
@@ -236,6 +240,18 @@ export async function saveRequestLog(data: {
   );
   
   const lastInsertRowid = result.lastInsertRowid as number;
+
+  // Real-time incremental update to permanent stats rollup tables
+  recordRequestStats({
+    userId: data.userId,
+    sessionId: data.sessionId,
+    method: data.method,
+    url: data.url,
+    path: parsedPath,
+    responseStatus: data.responseStatus,
+    durationMs: data.durationMs,
+    isMocked: data.isMocked,
+  });
 
   // Check cleanup asynchronously every 50 requests
   requestCounterSinceCleanup++;

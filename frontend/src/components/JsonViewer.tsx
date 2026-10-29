@@ -205,15 +205,8 @@ export default function JsonViewer({ data, maxHeight = 'none' }: JsonViewerProps
       </div>
       <div
         style={{ maxHeight, overflowY: 'auto' }}
-        className="bg-slate-900/50 rounded-lg p-3 text-xs leading-5"
+        className="bg-slate-900/50 border border-slate-800/60 rounded-lg p-3 text-xs leading-5"
       >
-        <style>{`
-          .json-key { color: #93c5fd; }
-          .json-string { color: #86efac; }
-          .json-number { color: #fcd34d; }
-          .json-bool { color: #f9a8d4; }
-          .json-null { color: #94a3b8; }
-        `}</style>
         {isJsonObject ? (
           <pre className="font-mono whitespace-pre-wrap break-words">
             <JsonNode

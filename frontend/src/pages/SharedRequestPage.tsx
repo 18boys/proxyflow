@@ -6,6 +6,7 @@ import { useStore } from '../store/useStore';
 import type { MockFolder, SharedRequest } from '../types';
 import { getStatusColor, getStatusColorClass, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from '../components/JsonViewer';
+import CustomSelect from '../components/CustomSelect';
 import { copyToClipboard } from '../utils/clipboard';
 
 export default function SharedRequestPage() {
@@ -195,17 +196,18 @@ export default function SharedRequestPage() {
                 className="min-w-56 flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
                 autoFocus
               />
-              <select
-                value={mockFolderId ?? ''}
-                onChange={(event) => setMockFolderId(event.target.value ? Number(event.target.value) : null)}
-                aria-label="Mock 文件夹"
-                className="bg-slate-900 border border-slate-600 text-slate-300 text-xs rounded px-2 py-1.5"
-              >
-                <option value="">未分类</option>
-                {mockFolders.map((folder) => (
-                  <option key={folder.id} value={folder.id}>{folder.name}</option>
-                ))}
-              </select>
+              <div className="w-44">
+                <CustomSelect
+                  size="xs"
+                  value={mockFolderId ?? ''}
+                  onChange={(val) => setMockFolderId(val ? Number(val) : null)}
+                  ariaLabel="Mock 文件夹"
+                  options={[
+                    { value: '', label: '未分类' },
+                    ...mockFolders.map((folder) => ({ value: folder.id, label: folder.name })),
+                  ]}
+                />
+              </div>
               <button
                 onClick={handleSaveMock}
                 disabled={saving || !mockName.trim()}

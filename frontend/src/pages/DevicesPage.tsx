@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Smartphone, Plus, Wifi, WifiOff, Trash2, Edit2, QrCode, X, Check, Shield, PlayCircle } from 'lucide-react';
+import { Smartphone, Plus, Wifi, WifiOff, Trash2, Edit2, QrCode, X, Check } from 'lucide-react';
 import QRCode from 'react-qr-code';
 import type { DeviceSession } from '../types';
-import { devicesApi, settingsApi } from '../api/client';
+import { devicesApi } from '../api/client';
 import { useStore } from '../store/useStore';
 import { useDialog } from '../context/DialogContext';
 import { copyToClipboard } from '../utils/clipboard';
@@ -16,19 +16,10 @@ export default function DevicesPage() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameInput, setRenameInput] = useState('');
 
-  // Exclusion domain state
-  const [exclusions, setExclusions] = useState<string[]>([]);
-  const [newDomain, setNewDomain] = useState('');
-  const [savingExclusions, setSavingExclusions] = useState(false);
-
   const loadDevices = async () => {
     try {
-      const [devData, settingsData] = await Promise.all([
-        devicesApi.list(),
-        settingsApi.getExclusions(),
-      ]);
+      const devData = await devicesApi.list();
       setDevices(devData);
-      setExclusions(settingsData.exclusion_domains || []);
     } catch {
       // ignore
     } finally {
@@ -64,42 +55,10 @@ export default function DevicesPage() {
     setRenaming(null);
   };
 
-
-
-  const handleAddExclusion = () => {
-    const domain = newDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-    if (!domain || exclusions.includes(domain)) return;
-    setExclusions([...exclusions, domain]);
-    setNewDomain('');
-  };
-
-  const handleRemoveExclusion = (domain: string) => {
-    setExclusions(exclusions.filter((d) => d !== domain));
-  };
-
-  const handleSaveExclusions = async () => {
-    setSavingExclusions(true);
-    try {
-      let finalExclusions = [...exclusions];
-      const domain = newDomain.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
-      if (domain && !finalExclusions.includes(domain)) {
-        finalExclusions.push(domain);
-        setNewDomain('');
-      }
-
-      const result = await settingsApi.updateExclusions(finalExclusions);
-      setExclusions(result.exclusion_domains);
-    } finally {
-      setSavingExclusions(false);
-    }
-  };
-
-
-
   return (
-    <div className="h-full flex flex-col overflow-y-auto">
+    <div className="h-full flex flex-col overflow-y-auto bg-slate-950">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900/30">
+      <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-900">
         <div>
           <h1 className="text-lg font-semibold text-slate-100">Connected Devices</h1>
           <p className="text-xs text-slate-500 mt-0.5">
@@ -147,65 +106,6 @@ export default function DevicesPage() {
             ))}
           </div>
         )}
-
-        {/* Exclusion Domains */}
-        <div className="card p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Shield size={16} className="text-cyan-400" />
-            <h2 className="text-sm font-semibold text-slate-200">Proxy Exclusion Domains</h2>
-          </div>
-          <p className="text-xs text-slate-500 mb-4">
-            Requests to these domains will be forwarded silently — they will not appear in the console or be subject to Mock rules.
-            Useful for analytics, crash reporting, and CDN traffic.
-          </p>
-
-          {/* Existing exclusions */}
-          {exclusions.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-3">
-              {exclusions.map((domain) => (
-                <span
-                  key={domain}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-slate-800 border border-slate-700 rounded-full text-xs text-slate-300 font-mono"
-                >
-                  {domain}
-                  <button
-                    onClick={() => handleRemoveExclusion(domain)}
-                    className="text-slate-500 hover:text-red-400 transition-colors"
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Add new domain */}
-          <div className="flex gap-2">
-            <input
-              value={newDomain}
-              onChange={(e) => setNewDomain(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAddExclusion()}
-              placeholder="e.g. analytics.google.com or sentry.io"
-              className="input-field flex-1 text-xs font-mono"
-            />
-            <button
-              onClick={handleAddExclusion}
-              className="btn-secondary text-xs px-3"
-            >
-              Add
-            </button>
-            <button
-              onClick={handleSaveExclusions}
-              disabled={savingExclusions}
-              className="btn-primary text-xs px-3 flex items-center gap-1.5"
-            >
-              {savingExclusions ? (
-                <span className="w-3 h-3 border border-white/30 border-t-white rounded-full animate-spin" />
-              ) : <Check size={12} />}
-              Save
-            </button>
-          </div>
-        </div>
       </div>
 
       {showPairModal && (
