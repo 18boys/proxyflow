@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useLayoutEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from './store/useStore';
 import { DialogProvider } from './context/DialogContext';
@@ -22,12 +22,19 @@ export default function App() {
   const theme = useStore((s) => s.theme);
   const { token, setAuth } = useStore();
 
-  useEffect(() => {
+  // Apply the theme class synchronously (before paint) and suppress CSS transitions while the
+  // theme flips. Otherwise every element with `transition-colors` animates its border/background
+  // from the old theme's colour, which makes list dividers and card borders flash visibly.
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.classList.add('theme-switching');
     if (theme === 'dark') {
-      document.documentElement.classList.remove('light');
+      root.classList.remove('light');
     } else {
-      document.documentElement.classList.add('light');
+      root.classList.add('light');
     }
+    const timer = window.setTimeout(() => root.classList.remove('theme-switching'), 120);
+    return () => window.clearTimeout(timer);
   }, [theme]);
 
   // Auto-refresh token on page load to extend expiry

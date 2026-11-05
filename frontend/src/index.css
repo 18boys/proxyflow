@@ -94,6 +94,15 @@
   color-scheme: light;
 }
 
+/* While the theme class is being flipped, disable every transition/animation-delay so borders,
+   dividers and backgrounds switch atomically instead of fading from the previous theme. */
+.theme-switching,
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
+}
+
 .light .status-green {
   color: #059669; /* text-emerald-600 */
 }
