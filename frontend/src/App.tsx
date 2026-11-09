@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useStore } from './store/useStore';
 import { DialogProvider } from './context/DialogContext';
 import Layout from './components/Layout';
+import AuthModal from './components/AuthModal';
 import AuthPage from './pages/AuthPage';
 import DashboardPage from './pages/DashboardPage';
 import MocksPage from './pages/MocksPage';
@@ -37,21 +38,33 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [theme]);
 
-  // Auto-refresh token on page load to extend expiry
+  // Auto-refresh token on page load, and poll every 12 hours while browser is open
   useEffect(() => {
     if (!token) return;
+
+    // 1. 启动时刷新一次
     authApi.refresh()
       .then(({ token: newToken, user }) => setAuth(user, newToken))
-      .catch(() => {/* token invalid, user will be redirected on next auth-required call */});
+      .catch(() => {/* 失败时若返回 401，拦截器已触发 AuthModal */});
+
+    // 2. 每 12 小时静默自动续期一次，只要持续在用就永远不会掉线
+    const interval = setInterval(() => {
+      authApi.refresh()
+        .then(({ token: newToken, user }) => setAuth(user, newToken))
+        .catch(() => {});
+    }, 12 * 60 * 60 * 1000);
+
+    return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [token]);
 
   return (
     <DialogProvider>
+      <AuthModal />
       <BrowserRouter>
         <Routes>
-        <Route path="/login" element={<AuthPage mode="login" />} />
-        <Route path="/register" element={<AuthPage mode="register" />} />
+        <Route path="/login" element={<AuthPage />} />
+        <Route path="/register" element={<AuthPage />} />
         <Route path="/share/:token" element={<SharedRequestPage />} />
         <Route
           path="/"

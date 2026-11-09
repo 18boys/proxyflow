@@ -10,6 +10,37 @@ export function clearTokenCookie() {
   document.cookie = `${TOKEN_COOKIE}=; max-age=0; path=/; SameSite=Strict`;
 }
 
+// 统一的 401 监听机制：允许注册回调，或者触发全局 CustomEvent
+type UnauthorizedListener = () => void;
+const unauthorizedListeners: Set<UnauthorizedListener> = new Set();
+
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => {
+    unauthorizedListeners.delete(listener);
+  };
+}
+
+let isHandling401 = false;
+function triggerUnauthorized() {
+  clearTokenCookie();
+  if (isHandling401) return;
+  isHandling401 = true;
+
+  // 广播 401 未授权通知
+  unauthorizedListeners.forEach((fn) => {
+    try { fn(); } catch { /* ignore */ }
+  });
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('proxyflow:unauthorized'));
+  }
+
+  // 1 秒防抖，避免瞬间几十个接口同时抛 401 导致疯狂重复弹窗
+  setTimeout(() => {
+    isHandling401 = false;
+  }, 1000);
+}
+
 function getToken(): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|; )${TOKEN_COOKIE}=([^;]*)`));
   return match ? decodeURIComponent(match[1]) : null;
@@ -35,6 +66,9 @@ async function request<T>(
   });
 
   if (!res.ok) {
+    if (res.status === 401 && !path.startsWith('/auth/login') && !path.startsWith('/auth/register') && !path.startsWith('/auth/continue')) {
+      triggerUnauthorized();
+    }
     const error = await res.json().catch(() => ({ error: res.statusText }));
     throw new Error(error.error || `HTTP ${res.status}`);
   }
@@ -73,6 +107,8 @@ function del<T>(path: string) {
 
 // ── Auth ──────────────────────────────────────────────────────────────────
 export const authApi = {
+  continueAuth: (email: string, password: string) =>
+    post<{ token: string; user: { id: number; email: string }; isNewUser: boolean }>('/auth/continue', { email, password }),
   register: (email: string, password: string) =>
     post<{ token: string; user: { id: number; email: string } }>('/auth/register', { email, password }),
   login: (email: string, password: string) =>
