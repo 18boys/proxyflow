@@ -100,6 +100,11 @@ const urlPatternField = z.string().min(1).describe(
   'Only the pathname is used (host and query string are ignored). Use "*" as a wildcard and ":id" or "{id}" for path parameters, e.g. "/api/users/:id".',
 );
 const methodField = z.string().optional().describe('HTTP method, e.g. "GET", "POST" (case-insensitive). Omit to not restrict by method.');
+const conditionField = z.object({
+  type: z.enum(['header', 'query', 'body']),
+  key: z.string().min(1),
+  value: z.string().min(1),
+}).optional().describe('Only serve/match this mock when the request has header/query param/JSON body field `key` equal to `value`.');
 const maxBodyField = z.number().int().min(200).max(100000).optional()
   .describe(`Max characters of each body to return (default ${DEFAULT_MAX_BODY_CHARS}). Larger bodies are truncated.`);
 
@@ -129,11 +134,7 @@ server.registerTool(
       enabled: z.boolean().optional().describe('Whether the mock is active. Defaults to true on create; unchanged on update when omitted.'),
       activate: z.boolean().optional()
         .describe('Set false to store this response as an alternate version WITHOUT making it the active one. Defaults to true.'),
-      condition: z.object({
-        type: z.enum(['header', 'query', 'body']),
-        key: z.string().min(1),
-        value: z.string().min(1),
-      }).optional().describe('Only serve this mock when the request has header/query param/JSON body field `key` equal to `value`. Lets one endpoint return different mocks per input. Rules with a condition take priority.'),
+      condition: conditionField,
       from_request_id: z.number().int().optional()
         .describe('Copy status, headers and body from a captured request (request log id from wait_for_request / list_recent_requests). Explicit response_* fields still override.'),
     },
@@ -307,17 +308,39 @@ server.registerTool(
 server.registerTool(
   'delete_mock',
   {
-    title: 'Delete a mock',
+    title: 'Delete a mock rule or version',
     description:
-      'Permanently delete the mock rule(s) (with all versions) for a URL pathname + method. Deletion is strict: an omitted method means the rule with no method restriction, not every method. ' +
-      'To merely stop mocking, use toggle_mock enabled=false instead. Use this to clean up temporary mocks when the real endpoint is done.',
+      'Permanently delete a mock rule (or a single stored version if version_id/version_name is given). ' +
+      'Target by rule_id (from list_mocks / upsert_mock) OR by url_pattern (+ optional method, condition, match_type). ' +
+      'Deletion is strict and guarded: an omitted method means the rule with no method restriction, not every method; ' +
+      'if multiple rules match (e.g. different conditions or match_types), it returns a 409 conflict listing candidates instead of wiping them all unless delete_all=true. ' +
+      'To merely stop mocking, use toggle_mock enabled=false instead.',
     inputSchema: {
-      url_pattern: urlPatternField,
+      rule_id: z.number().int().positive().optional()
+        .describe('Exact mock rule_id (from list_mocks or upsert_mock). Preferred when multiple rules share a path.'),
+      url_pattern: urlPatternField.optional(),
       method: methodField,
+      condition: conditionField,
+      match_type: z.enum(['exact', 'wildcard', 'regex']).optional()
+        .describe('Filter by match_type when multiple rules share the same url_pattern.'),
+      version_name: z.string().min(1).optional()
+        .describe('Delete ONLY this stored version/scenario from the matched rule instead of deleting the entire rule.'),
+      version_id: z.number().int().positive().optional()
+        .describe('Delete ONLY this version id from the matched rule instead of deleting the entire rule.'),
+      delete_all: z.boolean().optional()
+        .describe('Set true to delete ALL matching rules when multiple rules match url_pattern (+ method). Defaults to false (returns 409 conflict instead).'),
     },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
   },
-  async (args) => respond(await call('/api/mocks/delete-by-pattern', { method: 'POST', body: JSON.stringify(args) })),
+  async (args) => {
+    if (args.rule_id === undefined && !args.url_pattern) {
+      return { isError: true, content: [{ type: 'text', text: 'Provide either rule_id or url_pattern.' }] };
+    }
+    return respond(
+      await call('/api/mocks/delete-by-pattern', { method: 'POST', body: JSON.stringify(args) }),
+      (b) => (b?.deleted_version ? { ...condenseRule(b), deleted_version: b.deleted_version } : b),
+    );
+  },
 );
 
 // ── Startup ───────────────────────────────────────────────────────────────

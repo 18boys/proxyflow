@@ -221,10 +221,36 @@ check('unknown request id → error', r.err, r.raw);
 section('9. delete_mock');
 r = await tool('delete_mock', { url_pattern: '/api/users/1' });
 check('delete is strict: method omitted ≠ any method', r.err, r.raw);
+
+r = await tool('delete_mock', { url_pattern: '/api/users/1', method: 'GET', version_name: 'jerry' });
+check('deletes only the specified version without removing the rule', !r.err && r.data.deleted_version?.name === 'jerry' && r.data.versions.length === 1 && r.data.versions[0].name === 'tom-alt', r.raw);
+
 r = await tool('delete_mock', { url_pattern: '/api/users/1', method: 'GET' });
-check('deletes the rule', !r.err && r.data.deleted.length === 1, r.raw);
+check('deletes the single rule', !r.err && r.data.deleted.length === 1, r.raw);
 r = await tool('list_mocks', { search: '/api/users/1' });
 check('and it is gone', r.data.count === 0, r.raw);
+
+// Multiple rules on the same path (/api/search has default + tier=vip from section 3)
+r = await tool('delete_mock', { url_pattern: '/api/search' });
+check('ambiguous delete returns 409 with candidates instead of wiping all', r.err && /409/.test(r.raw) && /candidates/.test(r.raw), r.raw);
+r = await tool('list_mocks', { search: '/api/search' });
+check('both /api/search rules survive the 409', r.data.count === 2, r.raw);
+
+r = await tool('delete_mock', { url_pattern: '/api/search', condition: { type: 'query', key: 'tier', value: 'vip' } });
+check('condition deletes only that branch', !r.err && r.data.deleted.length === 1 && r.data.deleted[0].condition?.value === 'vip', r.raw);
+r = await tool('list_mocks', { search: '/api/search' });
+check('default /api/search rule remains', r.data.count === 1 && !r.data.mocks[0].condition, r.raw);
+
+const extra = await tool('upsert_mock', { url_pattern: '/api/search', condition: { type: 'query', key: 'tier', value: 'pro' }, response_body: { hit: 'pro' } });
+r = await tool('delete_mock', { rule_id: extra.data.rule_id });
+check('rule_id deletes only that exact rule', !r.err && r.data.deleted.length === 1 && r.data.deleted[0].id === extra.data.rule_id, r.raw);
+r = await tool('list_mocks', { search: '/api/search' });
+check('remaining /api/search rule is still intact', r.data.count === 1, r.raw);
+
+await tool('upsert_mock', { url_pattern: '/api/multi', condition: { type: 'query', key: 'k', value: '1' }, response_body: { k: 1 } });
+await tool('upsert_mock', { url_pattern: '/api/multi', condition: { type: 'query', key: 'k', value: '2' }, response_body: { k: 2 } });
+r = await tool('delete_mock', { url_pattern: '/api/multi', delete_all: true });
+check('delete_all=true deletes all matching rules when explicitly requested', !r.err && r.data.deleted.length === 2, r.raw);
 
 // ── 10. resilience ────────────────────────────────────────────────────────
 section('10. Resilience');

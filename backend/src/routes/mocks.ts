@@ -3,7 +3,7 @@ import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
 import { getSharedRequest } from '../sharedRequests';
 import {
-  MATCH_TYPES, normalizeUrlPattern, parseHeaders, stripHopHeaders, findRulesByPattern,
+  MATCH_TYPES, normalizeUrlPattern, parseHeaders, stripHopHeaders, findRulesByPattern, RuleLookup,
 } from '../mockUtils';
 
 const router = Router();
@@ -684,6 +684,43 @@ function bad(res: Response, error: string): void {
   res.status(400).json({ error });
 }
 
+interface ParsedCondition {
+  type: string;
+  key: string;
+  value: string;
+}
+
+function parseConditionInput(condition: unknown): { ok: true; value: ParsedCondition | null | undefined } | { ok: false; error: string } {
+  if (condition === undefined) return { ok: true, value: undefined };
+  if (condition === null) return { ok: true, value: null };
+  const c = condition as Record<string, unknown>;
+  const valid = typeof condition === 'object'
+    && ['header', 'query', 'body'].includes(String(c.type).toLowerCase())
+    && typeof c.key === 'string' && c.key.length > 0
+    && c.value !== undefined && c.value !== null && String(c.value) !== '';
+  if (!valid) return { ok: false, error: 'condition must be {type: "header"|"query"|"body", key, value}' };
+  return {
+    ok: true,
+    value: { type: String(c.type).toLowerCase(), key: c.key as string, value: String(c.value) },
+  };
+}
+
+function formatRuleCandidate(r: {
+  id: number; name: string; url_pattern: string; method: string | null; match_type: string;
+  condition_field_type: string | null; condition_field_key: string | null; condition_field_value: string | null;
+}) {
+  return {
+    rule_id: r.id,
+    name: r.name,
+    url_pattern: r.url_pattern,
+    method: r.method ?? 'ANY',
+    match_type: r.match_type,
+    condition: r.condition_field_type
+      ? { type: r.condition_field_type, key: r.condition_field_key, value: r.condition_field_value }
+      : null,
+  };
+}
+
 function ruleSummary(ruleId: number | bigint) {
   const db = getDb();
   const rule = db.prepare('SELECT * FROM mock_rules WHERE id = ?').get(ruleId) as Record<string, unknown>;
@@ -721,13 +758,8 @@ router.post('/upsert', requireAuth, (req: AuthRequest, res: Response): void => {
   if (response_headers !== undefined && (typeof response_headers !== 'object' || response_headers === null || Array.isArray(response_headers))) {
     return bad(res, 'response_headers must be an object of header name -> value');
   }
-  if (condition !== undefined && condition !== null) {
-    const ok = typeof condition === 'object'
-      && ['header', 'query', 'body'].includes(String(condition.type).toLowerCase())
-      && typeof condition.key === 'string' && condition.key
-      && condition.value !== undefined && condition.value !== null && String(condition.value) !== '';
-    if (!ok) return bad(res, 'condition must be {type: "header"|"query"|"body", key, value}');
-  }
+  const parsedCondition = parseConditionInput(condition);
+  if (!parsedCondition.ok) return bad(res, parsedCondition.error);
 
   const db = getDb();
   const userId = req.userId!;
@@ -751,9 +783,9 @@ router.post('/upsert', requireAuth, (req: AuthRequest, res: Response): void => {
   const normalizedMethod: string | null = method ? String(method).toUpperCase() : null;
   const { pattern, hadParams } = normalizeUrlPattern(url_pattern, match_type);
   const normalizedMatchType: string = hadParams ? 'wildcard' : (match_type || 'wildcard');
-  const cType: string | null = condition ? String(condition.type).toLowerCase() : null;
-  const cKey: string | null = condition ? String(condition.key) : null;
-  const cValue: string | null = condition ? String(condition.value) : null;
+  const cType: string | null = parsedCondition.value ? parsedCondition.value.type : null;
+  const cKey: string | null = parsedCondition.value ? parsedCondition.value.key : null;
+  const cValue: string | null = parsedCondition.value ? parsedCondition.value.value : null;
 
   const status: number = response_status ?? seedStatus ?? 200;
 
@@ -886,19 +918,122 @@ router.post('/switch-version', requireAuth, (req: AuthRequest, res: Response): v
   res.json({ ...ruleSummary(rule.id), switched_to: target });
 });
 
-// POST /api/mocks/delete-by-pattern - delete rule(s) matching pattern + method exactly (for MCP tooling)
+// POST /api/mocks/delete-by-pattern - delete a single mock rule (or version), or all matching if delete_all=true
 router.post('/delete-by-pattern', requireAuth, (req: AuthRequest, res: Response): void => {
-  const { url_pattern, method } = req.body;
-  if (!url_pattern) return bad(res, 'url_pattern is required');
-  // Deletion is strict: an omitted method means "the rule with no method restriction", not "all".
-  const rules = findRulesByPattern(req.userId!, url_pattern, method ? String(method).toUpperCase() : null);
+  const {
+    rule_id, url_pattern, method, condition, match_type, version_id, version_name, delete_all,
+  } = req.body;
+
+  if (rule_id !== undefined && rule_id !== null) {
+    if (!Number.isInteger(Number(rule_id)) || Number(rule_id) <= 0) {
+      return bad(res, 'rule_id must be a positive integer');
+    }
+  } else if (!url_pattern || typeof url_pattern !== 'string') {
+    return bad(res, 'rule_id or url_pattern is required');
+  }
+
+  if (match_type !== undefined && !(MATCH_TYPES as readonly string[]).includes(match_type)) {
+    return bad(res, `match_type must be one of: ${MATCH_TYPES.join(', ')}`);
+  }
+  const parsedCondition = parseConditionInput(condition);
+  if (!parsedCondition.ok) return bad(res, parsedCondition.error);
+
+  if (delete_all !== undefined && typeof delete_all !== 'boolean') {
+    return bad(res, 'delete_all must be a boolean');
+  }
+  if (version_id !== undefined && (!Number.isInteger(Number(version_id)) || Number(version_id) <= 0)) {
+    return bad(res, 'version_id must be a positive integer');
+  }
+  if (version_name !== undefined && (typeof version_name !== 'string' || !version_name)) {
+    return bad(res, 'version_name must be a non-empty string');
+  }
+  const deletingVersion = version_id !== undefined || version_name !== undefined;
+  if (delete_all && deletingVersion) {
+    return bad(res, 'delete_all cannot be combined with version_id / version_name');
+  }
+
+  const db = getDb();
+  const userId = req.userId!;
+  let rules: RuleLookup[];
+
+  if (rule_id !== undefined && rule_id !== null) {
+    const row = db.prepare('SELECT * FROM mock_rules WHERE id = ? AND user_id = ?')
+      .get(Number(rule_id), userId) as RuleLookup | undefined;
+    rules = row ? [row] : [];
+  } else {
+    // Deletion is strict: an omitted method means "the rule with no method restriction", not "all".
+    rules = findRulesByPattern(
+      userId,
+      url_pattern,
+      method ? String(method).toUpperCase() : null,
+      match_type,
+    );
+    if (parsedCondition.value === null) {
+      rules = rules.filter((r) => (r.condition_field_type ?? null) === null);
+    } else if (parsedCondition.value !== undefined) {
+      const c = parsedCondition.value;
+      rules = rules.filter((r) =>
+        r.condition_field_type === c.type
+        && r.condition_field_key === c.key
+        && r.condition_field_value === c.value,
+      );
+    }
+  }
+
   if (rules.length === 0) {
-    res.status(404).json({ error: 'No mock rule found for this url_pattern/method.' });
+    res.status(404).json({ error: 'No matching mock rule found.' });
     return;
   }
-  const del = getDb().prepare('DELETE FROM mock_rules WHERE id = ? AND user_id = ?');
-  for (const r of rules) del.run(r.id, req.userId!);
-  res.json({ success: true, deleted: rules.map((r) => ({ id: r.id, url_pattern: r.url_pattern, method: r.method })) });
+
+  if (rules.length > 1 && !delete_all) {
+    res.status(409).json({
+      error: 'Multiple mock rules match; pass rule_id (from candidates or list_mocks), condition, match_type, or set delete_all=true to delete all of them.',
+      candidates: rules.map(formatRuleCandidate),
+    });
+    return;
+  }
+
+  if (deletingVersion) {
+    const rule = rules[0];
+    const versions = db.prepare('SELECT id, name, response_status FROM mock_versions WHERE rule_id = ? ORDER BY id ASC')
+      .all(rule.id) as { id: number; name: string; response_status: number }[];
+    const target = version_id !== undefined
+      ? versions.find((v) => v.id === Number(version_id))
+      : versions.slice().reverse().find((v) => v.name === version_name);
+    if (!target) {
+      res.status(404).json({ error: 'Version not found', available_versions: versions });
+      return;
+    }
+    db.transaction(() => {
+      db.prepare('DELETE FROM mock_versions WHERE id = ? AND rule_id = ?').run(target.id, rule.id);
+      if (Number(rule.active_version_id) === target.id) {
+        db.prepare(`
+          UPDATE mock_rules
+          SET active_version_id = NULL, is_active = 0, updated_at = datetime('now', '+8 hours')
+          WHERE id = ? AND user_id = ?
+        `).run(rule.id, userId);
+      }
+    })();
+    res.json({ success: true, ...ruleSummary(rule.id), deleted_version: target });
+    return;
+  }
+
+  const del = db.prepare('DELETE FROM mock_rules WHERE id = ? AND user_id = ?');
+  db.transaction(() => {
+    for (const r of rules) del.run(r.id, userId);
+  })();
+  res.json({
+    success: true,
+    deleted: rules.map((r) => ({
+      id: r.id,
+      url_pattern: r.url_pattern,
+      method: r.method,
+      match_type: r.match_type,
+      ...(r.condition_field_type
+        ? { condition: { type: r.condition_field_type, key: r.condition_field_key, value: r.condition_field_value } }
+        : {}),
+    })),
+  });
 });
 
 export default router;

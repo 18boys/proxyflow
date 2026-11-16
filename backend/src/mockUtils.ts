@@ -52,11 +52,15 @@ export function stripHopHeaders(headers: Record<string, string>): Record<string,
 
 export interface RuleLookup {
   id: number;
+  name: string;
   method: string | null;
   match_type: string;
   url_pattern: string;
   is_active: number;
   active_version_id: number | null;
+  condition_field_type: string | null;
+  condition_field_key: string | null;
+  condition_field_value: string | null;
   [key: string]: unknown;
 }
 
@@ -64,14 +68,22 @@ export interface RuleLookup {
  * Find a user's rules by pattern. With `method` given, only that method (or null = "any" when
  * method === null). With method === undefined, every method matches.
  */
-export function findRulesByPattern(userId: number, rawPattern: string, method: string | null | undefined): RuleLookup[] {
-  const { pattern } = normalizeUrlPattern(rawPattern);
-  // Regex rules keep their raw pattern, so look those up by the raw string too.
-  const patterns = pattern === rawPattern ? [pattern] : [pattern, rawPattern];
+export function findRulesByPattern(
+  userId: number,
+  rawPattern: string,
+  method: string | null | undefined,
+  matchType?: string,
+): RuleLookup[] {
+  const { pattern } = normalizeUrlPattern(rawPattern, matchType);
+  // Regex rules keep their raw pattern, so look those up by the raw string too when matchType is unspecified.
+  const patterns = matchType === 'regex' || pattern === rawPattern ? [pattern] : [pattern, rawPattern];
   const marks = patterns.map(() => '?').join(',');
   const rows = getDb().prepare(
     `SELECT * FROM mock_rules WHERE user_id = ? AND url_pattern IN (${marks}) ORDER BY id ASC`
   ).all(userId, ...patterns) as RuleLookup[];
-  if (method === undefined) return rows;
-  return rows.filter((r) => (r.method ?? null) === method);
+  return rows.filter((r) => {
+    if (method !== undefined && (r.method ?? null) !== method) return false;
+    if (matchType !== undefined && r.match_type !== matchType) return false;
+    return true;
+  });
 }

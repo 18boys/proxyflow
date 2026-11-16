@@ -10,7 +10,7 @@
 | `toggle_mock` | 开启/关闭 mock。不传 `method` 时作用于该路径的所有规则；找不到时提示先 `upsert_mock`。 |
 | `list_mocks` | 列出 mock 规则（精简输出：版本列表 + 当前激活版本），`include_body` 可附带激活版本的响应体。 |
 | `switch_mock_version` | 在同一接口的多个场景（成功/空列表/报错…）之间切换激活版本，按 `version_name` 或 `version_id`。 |
-| `delete_mock` | 删除某路径+方法的 mock（严格匹配，不传 method ≠ 所有方法）。 |
+| `delete_mock` | 删除某条 mock 规则或单个版本。支持 `rule_id`、`url_pattern`（+ `method`/`condition`/`match_type`）、`version_name`/`version_id`；匹配多条时返回 409 候选列表，需明确 `rule_id`/`condition` 或 `delete_all: true` 才会全删。 |
 | `wait_for_request` | 阻塞等待匹配的真实请求经过代理并返回抓包结果。`lookback_ms` 可回溯已发生的请求，`only_real` 忽略被 mock 命中的请求；返回中 `source` 标明 MOCK/REAL，敏感请求头（Authorization/Cookie 等）自动打码，过大的 body 自动截断。 |
 | `list_recent_requests` | 最近抓到的请求摘要（id/时间/方法/URL/状态/来源），可按 URL、方法、状态（`404` / `5xx`）过滤。 |
 | `get_request` | 按 id 查看单个请求的完整详情（同样打码 + 截断）。 |
