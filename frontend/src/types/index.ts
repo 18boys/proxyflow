@@ -168,8 +168,70 @@ export interface StatsOverview {
     active_rules_count?: number;
     versions_count?: number;
     devices_count: number;
+    mcp_calls_count?: number;
+    mcp_tokens_count?: number;
     last_active_at: string | null;
   }>;
+  mcp_stats?: {
+    total_calls: number;
+    today_calls: number;
+    period_calls: number;
+    active_users: number;
+    active_tokens: number;
+    unique_endpoints: number;
+    write_calls: number;
+    read_calls: number;
+    users: Array<{
+      user_id: number;
+      email: string;
+      total_calls: number;
+      write_calls: number;
+      read_calls: number;
+      unique_endpoints: number;
+      last_used_at: string | null;
+      tokens: Array<{
+        id: number;
+        name: string;
+        token_prefix: string;
+        last_used_at: string | null;
+        revoked_at: string | null;
+      }>;
+      top_tools: Array<{
+        tool_name: string;
+        count: number;
+      }>;
+      recent_endpoints: string[];
+    }>;
+    endpoints: Array<{
+      endpoint: string;
+      method: string;
+      total_calls: number;
+      upsert_count: number;
+      inspect_count: number;
+      switch_toggle_count: number;
+      user_count: number;
+      users: string[];
+      tools: string[];
+      last_called_at: string;
+    }>;
+    tool_distribution: Array<{
+      tool_name: string;
+      count: number;
+      user_count: number;
+      last_called_at: string | null;
+    }>;
+    recent_calls: Array<{
+      id: number;
+      user_email: string;
+      token_name: string;
+      tool_name: string;
+      target_endpoint: string;
+      target_method: string;
+      status_code: number;
+      duration_ms: number;
+      created_at: string;
+    }>;
+  };
 }
 
 export type StatusColor = 'green' | 'orange' | 'red' | 'gray';

@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { requireAuth, AuthRequest } from '../auth';
-import { getDb, backfillStatsRollupIfNeeded } from '../db';
+import { getDb, backfillStatsRollupIfNeeded, backfillMcpStatsIfNeeded } from '../db';
 
 const router = Router();
 
@@ -27,6 +27,7 @@ router.get('/today', requireAuth, (_req: AuthRequest, res: Response): void => {
 router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
   backfillStatsRollupIfNeeded(db);
+  backfillMcpStatsIfNeeded(db);
 
   const days = Math.min(365, Math.max(7, Number(req.query['days']) || 30));
 
@@ -184,15 +185,18 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
       (SELECT COUNT(*) FROM mock_rules m WHERE m.user_id = u.id AND m.is_active = 1) as active_rules_count,
       (SELECT COUNT(*) FROM mock_versions v WHERE v.user_id = u.id) as versions_count,
       (SELECT COUNT(*) FROM device_sessions d WHERE d.user_id = u.id) as devices_count,
+      (SELECT COUNT(*) FROM stats_mcp_calls mc WHERE mc.user_id = u.id) as mcp_calls_count,
+      (SELECT COUNT(*) FROM api_tokens t WHERE t.user_id = u.id AND t.revoked_at IS NULL) as mcp_tokens_count,
       COALESCE(
         MAX(a.last_active_at),
+        (SELECT MAX(mc.created_at) FROM stats_mcp_calls mc WHERE mc.user_id = u.id),
         (SELECT MAX(d.last_seen) FROM device_sessions d WHERE d.user_id = u.id),
         u.created_at
       ) as last_active_at
     FROM users u
     LEFT JOIN stats_daily_actors a ON a.user_id = u.id AND a.actor_type = 'user'
     GROUP BY u.id
-    ORDER BY request_count DESC, last_active_at DESC
+    ORDER BY request_count DESC, mcp_calls_count DESC, last_active_at DESC
   `).all() as Array<{
     id: number;
     email: string;
@@ -203,7 +207,197 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
     active_rules_count: number;
     versions_count: number;
     devices_count: number;
+    mcp_calls_count: number;
+    mcp_tokens_count: number;
     last_active_at: string | null;
+  }>;
+
+  // 8. MCP Usage Statistics ("谁用了, 用了哪些接口")
+  const mcpSummaryRow = db.prepare(`
+    SELECT
+      COUNT(*) as total_calls,
+      COALESCE(SUM(CASE WHEN stat_date = date(datetime('now', '+8 hours')) THEN 1 ELSE 0 END), 0) as today_calls,
+      COALESCE(SUM(CASE WHEN stat_date >= date(datetime('now', '+8 hours', ?)) THEN 1 ELSE 0 END), 0) as period_calls,
+      COUNT(DISTINCT user_id) as active_users,
+      COUNT(DISTINCT CASE WHEN target_endpoint != '' AND target_endpoint != '*' THEN target_endpoint ELSE NULL END) as unique_endpoints,
+      COALESCE(SUM(CASE WHEN tool_name IN ('upsert_mock', 'toggle_mock', 'switch_mock_version', 'delete_mock') THEN 1 ELSE 0 END), 0) as write_calls,
+      COALESCE(SUM(CASE WHEN tool_name NOT IN ('upsert_mock', 'toggle_mock', 'switch_mock_version', 'delete_mock') THEN 1 ELSE 0 END), 0) as read_calls
+    FROM stats_mcp_calls
+  `).get(`-${days - 1} days`) as {
+    total_calls: number;
+    today_calls: number;
+    period_calls: number;
+    active_users: number;
+    unique_endpoints: number;
+    write_calls: number;
+    read_calls: number;
+  };
+
+  // 8a. MCP Users ("谁用了") — all users who have either called MCP or created API tokens
+  const mcpUserRows = db.prepare(`
+    SELECT
+      u.id as user_id,
+      u.email as email,
+      COUNT(mc.id) as total_calls,
+      COALESCE(SUM(CASE WHEN mc.tool_name IN ('upsert_mock', 'toggle_mock', 'switch_mock_version', 'delete_mock') THEN 1 ELSE 0 END), 0) as write_calls,
+      COALESCE(SUM(CASE WHEN mc.id IS NOT NULL AND mc.tool_name NOT IN ('upsert_mock', 'toggle_mock', 'switch_mock_version', 'delete_mock') THEN 1 ELSE 0 END), 0) as read_calls,
+      COUNT(DISTINCT CASE WHEN mc.target_endpoint != '' AND mc.target_endpoint != '*' THEN mc.target_endpoint ELSE NULL END) as unique_endpoints,
+      COALESCE(
+        MAX(mc.created_at),
+        (SELECT MAX(t.last_used_at) FROM api_tokens t WHERE t.user_id = u.id)
+      ) as last_used_at
+    FROM users u
+    LEFT JOIN stats_mcp_calls mc ON mc.user_id = u.id
+    WHERE EXISTS (SELECT 1 FROM stats_mcp_calls m2 WHERE m2.user_id = u.id)
+       OR EXISTS (SELECT 1 FROM api_tokens t2 WHERE t2.user_id = u.id)
+    GROUP BY u.id
+    ORDER BY total_calls DESC, last_used_at DESC
+  `).all() as Array<{
+    user_id: number;
+    email: string;
+    total_calls: number;
+    write_calls: number;
+    read_calls: number;
+    unique_endpoints: number;
+    last_used_at: string | null;
+  }>;
+
+  const userTokensStmt = db.prepare(`
+    SELECT id, name, token_prefix, last_used_at, revoked_at
+    FROM api_tokens
+    WHERE user_id = ?
+    ORDER BY revoked_at IS NOT NULL ASC, last_used_at DESC, id DESC
+  `);
+
+  const userToolsStmt = db.prepare(`
+    SELECT tool_name, COUNT(*) as count
+    FROM stats_mcp_calls
+    WHERE user_id = ?
+    GROUP BY tool_name
+    ORDER BY count DESC
+  `);
+
+  const userEndpointsStmt = db.prepare(`
+    SELECT target_endpoint
+    FROM stats_mcp_calls
+    WHERE user_id = ? AND target_endpoint != '' AND target_endpoint != '*'
+    GROUP BY target_endpoint
+    ORDER BY COUNT(*) DESC, MAX(created_at) DESC
+    LIMIT 5
+  `);
+
+  const mcpUsers = mcpUserRows.map((row) => {
+    const tokens = userTokensStmt.all(row.user_id) as Array<{
+      id: number;
+      name: string;
+      token_prefix: string;
+      last_used_at: string | null;
+      revoked_at: string | null;
+    }>;
+    const topTools = userToolsStmt.all(row.user_id) as Array<{ tool_name: string; count: number }>;
+    const recentEndpoints = (userEndpointsStmt.all(row.user_id) as Array<{ target_endpoint: string }>).map(
+      (r) => r.target_endpoint
+    );
+    return {
+      ...row,
+      tokens,
+      top_tools: topTools,
+      recent_endpoints: recentEndpoints,
+    };
+  });
+
+  // 8b. MCP Target Endpoints ("用了哪些接口" — AI 操作过的具体业务 API)
+  const mcpEndpointRows = db.prepare(`
+    SELECT
+      mc.target_endpoint as endpoint,
+      CASE
+        WHEN COUNT(DISTINCT CASE WHEN mc.target_method != 'ANY' THEN mc.target_method END) = 1
+        THEN MAX(CASE WHEN mc.target_method != 'ANY' THEN mc.target_method END)
+        ELSE COALESCE(NULLIF(MAX(CASE WHEN mc.target_method != 'ANY' THEN mc.target_method END), ''), 'ANY')
+      END as method,
+      COUNT(*) as total_calls,
+      SUM(CASE WHEN mc.tool_name = 'upsert_mock' THEN 1 ELSE 0 END) as upsert_count,
+      SUM(CASE WHEN mc.tool_name IN ('wait_for_request', 'list_recent_requests', 'get_request') THEN 1 ELSE 0 END) as inspect_count,
+      SUM(CASE WHEN mc.tool_name IN ('switch_mock_version', 'toggle_mock', 'delete_mock') THEN 1 ELSE 0 END) as switch_toggle_count,
+      COUNT(DISTINCT mc.user_id) as user_count,
+      GROUP_CONCAT(DISTINCT u.email) as user_emails,
+      GROUP_CONCAT(DISTINCT mc.tool_name) as tool_names,
+      MAX(mc.created_at) as last_called_at
+    FROM stats_mcp_calls mc
+    JOIN users u ON u.id = mc.user_id
+    WHERE mc.target_endpoint != '' AND mc.target_endpoint != '*'
+    GROUP BY mc.target_endpoint
+    ORDER BY total_calls DESC, last_called_at DESC
+    LIMIT 30
+  `).all() as Array<{
+    endpoint: string;
+    method: string;
+    total_calls: number;
+    upsert_count: number;
+    inspect_count: number;
+    switch_toggle_count: number;
+    user_count: number;
+    user_emails: string | null;
+    tool_names: string | null;
+    last_called_at: string;
+  }>;
+
+  const mcpEndpoints = mcpEndpointRows.map((r) => ({
+    endpoint: r.endpoint,
+    method: r.method || 'ANY',
+    total_calls: r.total_calls,
+    upsert_count: r.upsert_count,
+    inspect_count: r.inspect_count,
+    switch_toggle_count: r.switch_toggle_count,
+    user_count: r.user_count,
+    users: r.user_emails ? r.user_emails.split(',').filter(Boolean) : [],
+    tools: r.tool_names ? r.tool_names.split(',').filter(Boolean) : [],
+    last_called_at: r.last_called_at,
+  }));
+
+  // 8c. MCP Tool Distribution (8 MCP Tools)
+  const mcpToolDistribution = db.prepare(`
+    SELECT
+      tool_name,
+      COUNT(*) as count,
+      COUNT(DISTINCT user_id) as user_count,
+      MAX(created_at) as last_called_at
+    FROM stats_mcp_calls
+    GROUP BY tool_name
+    ORDER BY count DESC
+  `).all() as Array<{
+    tool_name: string;
+    count: number;
+    user_count: number;
+    last_called_at: string | null;
+  }>;
+
+  // 8d. Recent MCP Call Stream (最近调用流水)
+  const mcpRecentCalls = db.prepare(`
+    SELECT
+      mc.id,
+      u.email as user_email,
+      mc.token_name,
+      mc.tool_name,
+      mc.target_endpoint,
+      mc.target_method,
+      mc.status_code,
+      mc.duration_ms,
+      mc.created_at
+    FROM stats_mcp_calls mc
+    JOIN users u ON u.id = mc.user_id
+    ORDER BY mc.created_at DESC, mc.id DESC
+    LIMIT 30
+  `).all() as Array<{
+    id: number;
+    user_email: string;
+    token_name: string;
+    tool_name: string;
+    target_endpoint: string;
+    target_method: string;
+    status_code: number;
+    duration_ms: number;
+    created_at: string;
   }>;
 
   const mockedTotal = totals.mocked_requests || 0;
@@ -239,6 +433,20 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
     status_distribution: statusDistribution,
     top_endpoints: topEndpoints,
     user_leaderboard: userLeaderboard,
+    mcp_stats: {
+      total_calls: mcpSummaryRow?.total_calls || 0,
+      today_calls: mcpSummaryRow?.today_calls || 0,
+      period_calls: mcpSummaryRow?.period_calls || 0,
+      active_users: mcpSummaryRow?.active_users || 0,
+      active_tokens: activeMcpTokens,
+      unique_endpoints: mcpSummaryRow?.unique_endpoints || 0,
+      write_calls: mcpSummaryRow?.write_calls || 0,
+      read_calls: mcpSummaryRow?.read_calls || 0,
+      users: mcpUsers,
+      endpoints: mcpEndpoints,
+      tool_distribution: mcpToolDistribution,
+      recent_calls: mcpRecentCalls,
+    },
   });
 });
 

@@ -170,4 +170,18 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     duration_count:    'INTEGER NOT NULL DEFAULT 0',
     last_hit_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },
+
+  stats_mcp_calls: {
+    id:              'INTEGER PRIMARY KEY AUTOINCREMENT',
+    stat_date:       "TEXT NOT NULL DEFAULT (date(datetime('now', '+8 hours')))",
+    user_id:         'INTEGER NOT NULL REFERENCES users(id)',
+    token_id:        'INTEGER',
+    token_name:      "TEXT NOT NULL DEFAULT ''",
+    tool_name:       'TEXT NOT NULL',
+    target_endpoint: "TEXT NOT NULL DEFAULT ''",
+    target_method:   "TEXT NOT NULL DEFAULT 'ANY'",
+    status_code:     'INTEGER NOT NULL DEFAULT 200',
+    duration_ms:     'INTEGER NOT NULL DEFAULT 0',
+    created_at:      "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
 };

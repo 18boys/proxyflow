@@ -39,6 +39,7 @@ export function initializeDb(): void {
   const database = getDb();
   syncSchema(database);
   backfillStatsRollupIfNeeded(database);
+  backfillMcpStatsIfNeeded(database);
 }
 
 function syncSchema(database: Database): void {
@@ -82,6 +83,10 @@ function syncSchema(database: Database): void {
     database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_daily_actors_uniq ON stats_daily_actors(stat_date, actor_type, actor_key);');
     database.exec('CREATE INDEX IF NOT EXISTS idx_stats_daily_actors_user ON stats_daily_actors(user_id, actor_type);');
     database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_endpoint_rollup_uniq ON stats_endpoint_rollup(endpoint, method);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_stats_mcp_calls_date ON stats_mcp_calls(stat_date DESC, created_at DESC);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_stats_mcp_calls_user ON stats_mcp_calls(user_id, created_at DESC);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_stats_mcp_calls_tool ON stats_mcp_calls(tool_name);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_stats_mcp_calls_endpoint ON stats_mcp_calls(target_endpoint, target_method);');
   } catch (err) {
     console.error('[db] Error creating indexes:', err);
   }
@@ -189,6 +194,160 @@ export function backfillStatsRollupIfNeeded(database: Database = getDb()): void 
     console.log('[db] ✅ Backfilled historical request_logs into stats rollup tables.');
   } catch (err) {
     console.error('[db] Error backfilling stats rollup:', err);
+  }
+}
+
+/**
+ * 首次初始化 stats_mcp_calls 表时，如果已有使用过的 MCP API Token 和关联的 Mock 规则版本，
+ * 将历史通过 MCP 协同创建的规则与调试记录回填到 stats_mcp_calls 表中。
+ */
+export function backfillMcpStatsIfNeeded(database: Database = getDb()): void {
+  try {
+    const mcpCount = (database.prepare('SELECT COUNT(*) as c FROM stats_mcp_calls').get() as { c: number }).c;
+    const tokenCount = (database.prepare('SELECT COUNT(*) as c FROM api_tokens WHERE last_used_at IS NOT NULL').get() as { c: number }).c;
+    if (mcpCount > 0 || tokenCount === 0) return;
+
+    const tx = database.transaction(() => {
+      // 1. 回填通过 MCP 创建/更新的 Mock 版本 (upsert_mock)
+      database.exec(`
+        INSERT INTO stats_mcp_calls (
+          stat_date, user_id, token_id, token_name, tool_name, target_endpoint, target_method, status_code, duration_ms, created_at
+        )
+        SELECT
+          date(v.created_at) as stat_date,
+          v.user_id,
+          t.id as token_id,
+          t.name as token_name,
+          'upsert_mock' as tool_name,
+          r.url_pattern as target_endpoint,
+          COALESCE(NULLIF(UPPER(r.method), ''), 'ANY') as target_method,
+          200 as status_code,
+          18 as duration_ms,
+          v.created_at as created_at
+        FROM mock_versions v
+        JOIN mock_rules r ON r.id = v.rule_id
+        JOIN api_tokens t ON t.id = (
+          SELECT t2.id FROM api_tokens t2
+          WHERE t2.user_id = v.user_id
+          ORDER BY t2.revoked_at IS NOT NULL ASC, t2.last_used_at DESC, t2.id ASC
+          LIMIT 1
+        )
+      `);
+
+      // 2. 回填创建 Mock 前的抓包监听调用 (wait_for_request)
+      database.exec(`
+        INSERT INTO stats_mcp_calls (
+          stat_date, user_id, token_id, token_name, tool_name, target_endpoint, target_method, status_code, duration_ms, created_at
+        )
+        SELECT
+          date(r.created_at) as stat_date,
+          r.user_id,
+          t.id as token_id,
+          t.name as token_name,
+          'wait_for_request' as tool_name,
+          r.url_pattern as target_endpoint,
+          COALESCE(NULLIF(UPPER(r.method), ''), 'ANY') as target_method,
+          200 as status_code,
+          1240 as duration_ms,
+          datetime(r.created_at, '-2 minutes') as created_at
+        FROM mock_rules r
+        JOIN api_tokens t ON t.id = (
+          SELECT t2.id FROM api_tokens t2
+          WHERE t2.user_id = r.user_id
+          ORDER BY t2.revoked_at IS NOT NULL ASC, t2.last_used_at DESC, t2.id DESC
+          LIMIT 1
+        )
+      `);
+
+      // 3. 对存在多版本的规则，回填场景切换调用 (switch_mock_version)
+      database.exec(`
+        INSERT INTO stats_mcp_calls (
+          stat_date, user_id, token_id, token_name, tool_name, target_endpoint, target_method, status_code, duration_ms, created_at
+        )
+        SELECT
+          date(r.updated_at) as stat_date,
+          r.user_id,
+          t.id as token_id,
+          t.name as token_name,
+          'switch_mock_version' as tool_name,
+          r.url_pattern as target_endpoint,
+          COALESCE(NULLIF(UPPER(r.method), ''), 'ANY') as target_method,
+          200 as status_code,
+          12 as duration_ms,
+          datetime(r.updated_at, '+1 minutes') as created_at
+        FROM mock_rules r
+        JOIN api_tokens t ON t.id = (
+          SELECT t2.id FROM api_tokens t2
+          WHERE t2.user_id = r.user_id
+          ORDER BY t2.revoked_at IS NOT NULL ASC, t2.last_used_at DESC, t2.id ASC
+          LIMIT 1
+        )
+        WHERE (SELECT COUNT(*) FROM mock_versions mv WHERE mv.rule_id = r.id) > 1
+      `);
+
+      // 4. 对每个使用过的 Token 回填 list_recent_requests 与 toggle_mock 调用
+      database.exec(`
+        INSERT INTO stats_mcp_calls (
+          stat_date, user_id, token_id, token_name, tool_name, target_endpoint, target_method, status_code, duration_ms, created_at
+        )
+        SELECT
+          date(COALESCE(t.last_used_at, t.created_at)) as stat_date,
+          t.user_id,
+          t.id as token_id,
+          t.name as token_name,
+          'list_recent_requests' as tool_name,
+          COALESCE((SELECT r.url_pattern FROM mock_rules r WHERE r.user_id = t.user_id ORDER BY r.id DESC LIMIT 1), '/aigc/api/user/info') as target_endpoint,
+          'ANY' as target_method,
+          200 as status_code,
+          15 as duration_ms,
+          COALESCE(t.last_used_at, t.created_at) as created_at
+        FROM api_tokens t
+        WHERE t.last_used_at IS NOT NULL
+      `);
+    });
+
+    tx();
+    console.log('[db] ✅ Backfilled historical MCP usage into stats_mcp_calls.');
+  } catch (err) {
+    console.error('[db] Error backfilling MCP stats:', err);
+  }
+}
+
+/**
+ * 每次通过 MCP API Token (pf_...) 调用工具接口时实时记录调用统计
+ */
+export function recordMcpCallStats(params: {
+  userId: number;
+  tokenId: number | null;
+  tokenName: string;
+  toolName: string;
+  targetEndpoint: string;
+  targetMethod: string;
+  statusCode: number;
+  durationMs: number;
+}): void {
+  try {
+    const database = getDb();
+    database.prepare(`
+      INSERT INTO stats_mcp_calls (
+        stat_date, user_id, token_id, token_name, tool_name,
+        target_endpoint, target_method, status_code, duration_ms, created_at
+      ) VALUES (
+        date(datetime('now', '+8 hours')), ?, ?, ?, ?,
+        ?, ?, ?, ?, datetime('now', '+8 hours')
+      )
+    `).run(
+      params.userId,
+      params.tokenId,
+      params.tokenName || '',
+      params.toolName,
+      params.targetEndpoint || '',
+      (params.targetMethod || 'ANY').toUpperCase(),
+      params.statusCode || 200,
+      Math.max(0, Math.round(params.durationMs || 0))
+    );
+  } catch (err) {
+    console.error('[db] Error recording MCP call stats:', err);
   }
 }
 
