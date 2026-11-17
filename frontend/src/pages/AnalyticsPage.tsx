@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { statsApi } from '../api/client';
 import { useStore } from '../store/useStore';
-import { getMethodColor, type StatsOverview } from '../types';
+import type { StatsOverview } from '../types';
 import CustomSelect from '../components/CustomSelect';
 
 const MCP_TOOL_META: Record<string, { label: string; badge: string; barColor: string }> = {
@@ -121,8 +121,8 @@ export default function AnalyticsPage() {
   const [userSearch, setUserSearch] = useState('');
   const [userPage, setUserPage] = useState(1);
   const [userPageSize, setUserPageSize] = useState(10);
-  const [mcpTab, setMcpTab] = useState<'endpoints' | 'recent'>('endpoints');
-  const [mcpEndpointSearch, setMcpEndpointSearch] = useState('');
+  const [mcpUserPage, setMcpUserPage] = useState(1);
+  const mcpUserPageSize = 4;
 
   // Measure exact pixel width of chart container for 1:1 crisp SVG rendering
   const chartContainerRef = useRef<HTMLDivElement>(null);
@@ -188,18 +188,13 @@ export default function AnalyticsPage() {
     return filteredUsers.slice(start, start + userPageSize);
   }, [filteredUsers, currentUserPage, userPageSize]);
 
-  const filteredMcpEndpoints = useMemo(() => {
-    const list = data?.mcp_stats?.endpoints || [];
-    const q = mcpEndpointSearch.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (item) =>
-        item.endpoint.toLowerCase().includes(q) ||
-        item.method.toLowerCase().includes(q) ||
-        item.users.some((u) => u.toLowerCase().includes(q)) ||
-        item.tools.some((t) => t.toLowerCase().includes(q))
-    );
-  }, [data, mcpEndpointSearch]);
+  const mcpUsersList = data?.mcp_stats?.users || [];
+  const totalMcpUserPages = Math.max(1, Math.ceil(mcpUsersList.length / mcpUserPageSize));
+  const currentMcpUserPage = Math.min(mcpUserPage, totalMcpUserPages);
+  const paginatedMcpUsers = useMemo(() => {
+    const start = (currentMcpUserPage - 1) * mcpUserPageSize;
+    return mcpUsersList.slice(start, start + mcpUserPageSize);
+  }, [mcpUsersList, currentMcpUserPage]);
 
   const reportText = useMemo(() => {
     if (!data) return '';
@@ -214,7 +209,7 @@ export default function AnalyticsPage() {
         `3. 规则与性能：沉淀业务分组 ${s.total_folders} 个、Mock 规则 ${s.total_mock_rules} 条（${s.total_mock_versions} 个响应版本）；真实代理平均耗时 ${s.avg_proxy_duration_ms}ms，Mock 响应平均耗时 ${s.avg_mock_duration_ms}ms。`,
         ...(m
           ? [
-              `4. MCP AI 协同：累计通过 MCP 工具调用 ${m.total_calls.toLocaleString()} 次（写 Mock 规则 ${m.write_calls} 次，抓包监听/查询 ${m.read_calls} 次），覆盖 ${m.active_users} 位开发者、${m.unique_endpoints} 个业务接口。`,
+              `4. MCP AI 协同：累计调用 MCP 接口 ${m.total_calls.toLocaleString()} 次（写 Mock 规则 ${m.write_calls} 次，抓包监听/查询 ${m.read_calls} 次），共 ${m.active_users} 位开发者使用。`,
             ]
           : []),
       ].join('\n');
@@ -228,7 +223,7 @@ export default function AnalyticsPage() {
       `- **规则沉淀与耗时**：已配置 **${s.total_mock_rules}** 条 Mock 规则（**${s.total_mock_versions}** 个版本），代理平均响应 **${s.avg_proxy_duration_ms} ms**，Mock 平均响应 **${s.avg_mock_duration_ms} ms**`,
       ...(m
         ? [
-            `- **MCP AI 协同联调**：累计调用 MCP 工具 **${m.total_calls.toLocaleString()}** 次（覆盖 **${m.active_users}** 位开发者、**${m.unique_endpoints}** 个业务接口，其中自动配置/切换 Mock **${m.write_calls}** 次，抓包监听与查询 **${m.read_calls}** 次）`,
+            `- **MCP AI 协同联调**：累计调用 MCP 接口 **${m.total_calls.toLocaleString()}** 次（共 **${m.active_users}** 位开发者使用，其中自动配置/切换 Mock **${m.write_calls}** 次，抓包监听与查询 **${m.read_calls}** 次）`,
           ]
         : []),
     ].join('\n');
@@ -947,7 +942,7 @@ export default function AnalyticsPage() {
           </div>
         </div>
 
-        {/* 2.5 MCP AI 协同联调统计 (谁用了 & 用了哪些接口) */}
+        {/* 2.5 MCP AI 协同联调统计 (谁用了 & 用了哪些 MCP 接口) */}
         {data.mcp_stats && (
           <div className="rounded-xl bg-slate-900 border border-slate-800 p-5 shadow-sm space-y-5">
             {/* Section Header + Top Summary Strip */}
@@ -966,7 +961,7 @@ export default function AnalyticsPage() {
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
-                    追踪谁通过 Claude Code / Cursor 等 MCP 客户端调用了工具，以及 AI 操作了哪些具体业务接口
+                    统计哪些开发者通过 Claude Code / Cursor 等客户端接入，以及各 MCP 工具接口的调用分布
                   </p>
                 </div>
               </div>
@@ -1001,12 +996,12 @@ export default function AnalyticsPage() {
                 </div>
 
                 <div className="px-3.5 py-2 rounded-lg bg-slate-950/60 border border-slate-800">
-                  <div className="text-[11px] text-slate-400">AI 触达业务接口</div>
+                  <div className="text-[11px] text-slate-400">已使用 MCP 接口</div>
                   <div className="mt-0.5 flex items-baseline gap-1.5">
                     <span className="text-base font-bold font-mono text-emerald-400">
-                      {data.mcp_stats.unique_endpoints}
+                      {data.mcp_stats.tool_distribution.length}
                     </span>
-                    <span className="text-[11px] text-slate-400">个独立接口</span>
+                    <span className="text-[11px] text-slate-400">/ 8 个工具</span>
                   </div>
                 </div>
 
@@ -1021,12 +1016,11 @@ export default function AnalyticsPage() {
               </div>
             </div>
 
-            {/* Main Grid: Left = 谁用了 + 工具分布 | Right = 用了哪些接口 + 实时调用流水 */}
+            {/* Side-by-Side: Left = 谁用了 MCP | Right = 用了哪些 MCP 接口 */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 pt-1">
-              {/* Left Column (5 cols): 1. 谁用了 MCP  2. MCP 工具调用分布 */}
-              <div className="lg:col-span-5 space-y-4">
-                {/* Subcard A: 谁用了 MCP */}
-                <div className="rounded-xl bg-slate-950/50 border border-slate-800/90 p-4">
+              {/* Left Column (7 cols): 谁用了 MCP */}
+              <div className="lg:col-span-7 rounded-xl bg-slate-950/50 border border-slate-800/90 p-4 flex flex-col justify-between">
+                <div>
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <h3 className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
@@ -1034,33 +1028,32 @@ export default function AnalyticsPage() {
                         谁用了 MCP（开发者与客户端 Token）
                       </h3>
                       <p className="text-[11px] text-slate-400 mt-0.5">
-                        按账号统计 MCP 调用频次、关联客户端及常用工具
+                        按账号统计 MCP 调用频次、关联客户端及每个人调用了哪些 MCP 接口
                       </p>
                     </div>
                     <span className="text-[11px] font-mono text-slate-400">
-                      共 {data.mcp_stats.users.length} 人
+                      共 {mcpUsersList.length} 人
                     </span>
                   </div>
 
-                  {data.mcp_stats.users.length === 0 ? (
-                    <div className="py-6 text-center text-xs text-slate-500">
+                  {paginatedMcpUsers.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-500">
                       暂无开发者使用 MCP，可在「系统设置 → API Tokens」创建 Token 接入
                     </div>
                   ) : (
-                    <div className="space-y-2.5 max-h-[310px] overflow-y-auto pr-1">
-                      {data.mcp_stats.users.map((u) => {
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {paginatedMcpUsers.map((u) => {
                         const rel = formatRelativeActive(u.last_used_at);
                         return (
                           <div
                             key={u.user_id}
-                            className="rounded-lg bg-slate-900/90 border border-slate-800/80 p-3 hover:border-slate-700 transition-colors"
+                            className="rounded-lg bg-slate-900/90 border border-slate-800/80 p-3 hover:border-slate-700 transition-colors flex flex-col justify-between"
                           >
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0">
-                                <div className="font-medium text-xs text-slate-100 truncate">
+                                <div className="font-medium text-xs text-slate-100 truncate" title={u.email}>
                                   {u.email}
                                 </div>
-                                {/* Token badges */}
                                 {u.tokens.length > 0 && (
                                   <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                                     {u.tokens.map((t) => (
@@ -1083,18 +1076,18 @@ export default function AnalyticsPage() {
 
                               <div className="text-right shrink-0">
                                 <div className="text-sm font-bold font-mono text-violet-400">
-                                  {u.total_calls} <span className="text-[10px] font-normal text-slate-400">次调用</span>
+                                  {u.total_calls} <span className="text-[10px] font-normal text-slate-400">次</span>
                                 </div>
                                 <div className="text-[10px] font-mono text-slate-400 mt-0.5">
-                                  调过 <strong className="text-slate-200">{u.unique_endpoints}</strong> 个接口
+                                  <span className="text-emerald-400">{u.write_calls}写</span> ·{' '}
+                                  <span className="text-cyan-400">{u.read_calls}读</span>
                                 </div>
                               </div>
                             </div>
 
-                            {/* Top tools used by this developer */}
                             {u.top_tools.length > 0 && (
                               <div className="flex flex-wrap items-center gap-1.5 mt-2.5 pt-2 border-t border-slate-800/70">
-                                {u.top_tools.slice(0, 4).map((t) => {
+                                {u.top_tools.map((t) => {
                                   const meta = MCP_TOOL_META[t.tool_name];
                                   return (
                                     <span
@@ -1122,262 +1115,88 @@ export default function AnalyticsPage() {
                   )}
                 </div>
 
-                {/* Subcard B: MCP 工具调用分布 */}
-                <div className="rounded-xl bg-slate-950/50 border border-slate-800/90 p-4">
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-xs font-bold text-slate-200">
-                      MCP 工具调用分布 (Tool Breakdown)
-                    </h3>
-                    <span className="text-[11px] text-slate-400">
-                      按工具统计调用占比
+                {totalMcpUserPages > 1 && (
+                  <div className="mt-3 pt-2.5 border-t border-slate-800/70 flex items-center justify-between text-xs text-slate-400">
+                    <span>
+                      第 <strong className="font-mono text-slate-200">{currentMcpUserPage}</strong> / {totalMcpUserPages} 页
                     </span>
-                  </div>
-                  {data.mcp_stats.tool_distribution.length === 0 ? (
-                    <div className="py-4 text-center text-xs text-slate-500">暂无工具调用记录</div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {data.mcp_stats.tool_distribution.map((item) => {
-                        const meta = MCP_TOOL_META[item.tool_name];
-                        const pct =
-                          data.mcp_stats && data.mcp_stats.total_calls > 0
-                            ? Math.round((item.count / data.mcp_stats.total_calls) * 100)
-                            : 0;
-                        return (
-                          <div key={item.tool_name} className="space-y-1">
-                            <div className="flex items-center justify-between text-xs">
-                              <div className="flex items-center gap-2 min-w-0">
-                                <span className="font-mono font-semibold text-slate-200">
-                                  {item.tool_name}
-                                </span>
-                                {meta && (
-                                  <span className="text-[11px] text-slate-400 truncate">
-                                    {meta.label}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2 font-mono text-xs shrink-0">
-                                <span className="text-slate-400 text-[11px]">{item.user_count}人</span>
-                                <span className="text-slate-200 font-semibold">{item.count} 次</span>
-                                <span className="text-slate-400 w-9 text-right">{pct}%</span>
-                              </div>
-                            </div>
-                            <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
-                              <div
-                                className={`h-full rounded-full ${meta?.barColor || 'bg-violet-500'}`}
-                                style={{ width: `${Math.max(4, pct)}%` }}
-                              />
-                            </div>
-                          </div>
-                        );
-                      })}
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={currentMcpUserPage <= 1}
+                        onClick={() => setMcpUserPage((p) => Math.max(1, p - 1))}
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-40 disabled:pointer-events-none"
+                      >
+                        <ChevronLeft size={12} />
+                        上一页
+                      </button>
+                      <button
+                        type="button"
+                        disabled={currentMcpUserPage >= totalMcpUserPages}
+                        onClick={() => setMcpUserPage((p) => Math.min(totalMcpUserPages, p + 1))}
+                        className="flex items-center gap-1 px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 disabled:opacity-40 disabled:pointer-events-none"
+                      >
+                        下一页
+                        <ChevronRight size={12} />
+                      </button>
                     </div>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
 
-              {/* Right Column (7 cols): 用了哪些接口 (按目标业务接口聚合 & 最近调用流水) */}
-              <div className="lg:col-span-7 rounded-xl bg-slate-950/50 border border-slate-800/90 p-4 flex flex-col">
-                <div className="flex flex-wrap items-center justify-between gap-2.5 mb-3">
-                  <div className="flex items-center gap-1.5 rounded-lg bg-slate-900 p-0.5 border border-slate-800 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => setMcpTab('endpoints')}
-                      className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                        mcpTab === 'endpoints'
-                          ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      用了哪些接口 ({data.mcp_stats.endpoints.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMcpTab('recent')}
-                      className={`px-2.5 py-1 rounded-md font-medium transition-colors ${
-                        mcpTab === 'recent'
-                          ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
-                    >
-                      最近调用流水 ({data.mcp_stats.recent_calls.length})
-                    </button>
+              {/* Right Column (5 cols): 用了哪些 MCP 接口 (MCP 工具调用分布) */}
+              <div className="lg:col-span-5 rounded-xl bg-slate-950/50 border border-slate-800/90 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <h3 className="text-xs font-bold text-slate-200">
+                      用了哪些 MCP 接口 (Tool Breakdown)
+                    </h3>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      各 MCP 工具接口调用次数、使用人数与占比
+                    </p>
                   </div>
-
-                  {mcpTab === 'endpoints' && (
-                    <div className="relative">
-                      <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
-                      <input
-                        type="text"
-                        value={mcpEndpointSearch}
-                        onChange={(e) => setMcpEndpointSearch(e.target.value)}
-                        placeholder="搜索接口路径或开发者..."
-                        className="input-field pl-7 pr-2.5 py-1 text-xs w-52"
-                      />
-                    </div>
-                  )}
+                  <span className="text-[11px] font-mono text-slate-400">
+                    共 {data.mcp_stats.tool_distribution.length} 个接口
+                  </span>
                 </div>
-
-                {mcpTab === 'endpoints' ? (
-                  <div className="overflow-x-auto flex-1">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-800 text-[11px] text-slate-400">
-                          <th className="py-2 pr-3 font-medium">被 MCP 操作的业务接口</th>
-                          <th className="py-2 px-2.5 font-medium text-right">调用次数</th>
-                          <th className="py-2 px-2.5 font-medium">执行动作拆解</th>
-                          <th className="py-2 px-2.5 font-medium">谁调过</th>
-                          <th className="py-2 pl-2.5 font-medium text-right">最近操作</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60 text-xs">
-                        {filteredMcpEndpoints.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="py-8 text-center text-slate-500">
-                              未找到匹配的 MCP 接口操作记录
-                            </td>
-                          </tr>
-                        ) : (
-                          filteredMcpEndpoints.map((ep) => {
-                            const rel = formatRelativeActive(ep.last_called_at);
-                            return (
-                              <tr key={`${ep.method}-${ep.endpoint}`} className="hover:bg-slate-800/40 transition-colors">
-                                <td className="py-2.5 pr-3">
-                                  <div className="flex items-center gap-2">
-                                    <span
-                                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold shrink-0 ${getMethodColor(
-                                        ep.method
-                                      )}`}
-                                    >
-                                      {ep.method}
-                                    </span>
-                                    <span
-                                      className="font-mono text-slate-200 break-all"
-                                      title={ep.endpoint}
-                                    >
-                                      {ep.endpoint}
-                                    </span>
-                                  </div>
-                                </td>
-                                <td className="py-2.5 px-2.5 text-right font-mono font-bold text-violet-400 whitespace-nowrap">
-                                  {ep.total_calls} 次
-                                </td>
-                                <td className="py-2.5 px-2.5">
-                                  <div className="flex flex-wrap items-center gap-1 text-[11px] font-mono">
-                                    {ep.upsert_count > 0 && (
-                                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25">
-                                        配Mock ×{ep.upsert_count}
-                                      </span>
-                                    )}
-                                    {ep.inspect_count > 0 && (
-                                      <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-400 border border-cyan-500/25">
-                                        抓包监听 ×{ep.inspect_count}
-                                      </span>
-                                    )}
-                                    {ep.switch_toggle_count > 0 && (
-                                      <span className="px-1.5 py-0.5 rounded bg-violet-500/15 text-violet-400 border border-violet-500/25">
-                                        切版本/启停 ×{ep.switch_toggle_count}
-                                      </span>
-                                    )}
-                                  </div>
-                                </td>
-                                <td className="py-2.5 px-2.5">
-                                  <div className="flex flex-wrap items-center gap-1">
-                                    {ep.users.map((email) => (
-                                      <span
-                                        key={email}
-                                        title={email}
-                                        className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 text-[11px] font-mono"
-                                      >
-                                        {email.split('@')[0]}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </td>
-                                <td className="py-2.5 pl-2.5 text-right font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                                  {rel.label || ep.last_called_at.slice(5, 16)}
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                {data.mcp_stats.tool_distribution.length === 0 ? (
+                  <div className="py-8 text-center text-xs text-slate-500">暂无 MCP 接口调用记录</div>
                 ) : (
-                  <div className="overflow-x-auto max-h-[460px] overflow-y-auto flex-1">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-800 text-[11px] text-slate-400">
-                          <th className="py-2 pr-2.5 font-medium">时间</th>
-                          <th className="py-2 px-2.5 font-medium">开发者 / 客户端</th>
-                          <th className="py-2 px-2.5 font-medium">MCP 工具</th>
-                          <th className="py-2 px-2.5 font-medium">操作的目标接口</th>
-                          <th className="py-2 pl-2.5 font-medium text-right">耗时</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60 text-xs">
-                        {data.mcp_stats.recent_calls.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="py-8 text-center text-slate-500">
-                              暂无 MCP 调用流水记录
-                            </td>
-                          </tr>
-                        ) : (
-                          data.mcp_stats.recent_calls.map((call) => {
-                            const meta = MCP_TOOL_META[call.tool_name];
-                            return (
-                              <tr key={call.id} className="hover:bg-slate-800/40 transition-colors">
-                                <td className="py-2.5 pr-2.5 font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                                  {call.created_at.slice(5, 19)}
-                                </td>
-                                <td className="py-2.5 px-2.5 whitespace-nowrap">
-                                  <div className="text-slate-200 font-medium">
-                                    {call.user_email.split('@')[0]}
-                                  </div>
-                                  {call.token_name && (
-                                    <div className="text-[10px] font-mono text-slate-400">
-                                      {call.token_name}
-                                    </div>
-                                  )}
-                                </td>
-                                <td className="py-2.5 px-2.5 whitespace-nowrap">
-                                  <span
-                                    className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[11px] font-mono ${
-                                      meta?.badge || 'bg-slate-800 text-slate-300 border-slate-700'
-                                    }`}
-                                  >
-                                    {call.tool_name}
-                                  </span>
-                                </td>
-                                <td className="py-2.5 px-2.5">
-                                  {call.target_endpoint && call.target_endpoint !== '*' ? (
-                                    <div className="flex items-center gap-1.5">
-                                      {call.target_method && call.target_method !== 'ANY' && (
-                                        <span
-                                          className={`px-1 py-0.5 rounded text-[10px] font-mono font-semibold ${getMethodColor(
-                                            call.target_method
-                                          )}`}
-                                        >
-                                          {call.target_method}
-                                        </span>
-                                      )}
-                                      <span className="font-mono text-slate-200 break-all">
-                                        {call.target_endpoint}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <span className="text-slate-500 font-mono text-[11px]">全局列表查询</span>
-                                  )}
-                                </td>
-                                <td className="py-2.5 pl-2.5 text-right font-mono text-[11px] text-slate-400 whitespace-nowrap">
-                                  {call.duration_ms} ms
-                                </td>
-                              </tr>
-                            );
-                          })
-                        )}
-                      </tbody>
-                    </table>
+                  <div className="space-y-3">
+                    {data.mcp_stats.tool_distribution.map((item) => {
+                      const meta = MCP_TOOL_META[item.tool_name];
+                      const pct =
+                        data.mcp_stats && data.mcp_stats.total_calls > 0
+                          ? Math.round((item.count / data.mcp_stats.total_calls) * 100)
+                          : 0;
+                      return (
+                        <div key={item.tool_name} className="space-y-1.5">
+                          <div className="flex items-center justify-between text-xs">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="font-mono font-semibold text-slate-200">
+                                {item.tool_name}
+                              </span>
+                              {meta && (
+                                <span className="text-[11px] text-slate-400 truncate">
+                                  {meta.label}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 font-mono text-xs shrink-0">
+                              <span className="text-slate-400 text-[11px]">{item.user_count}人</span>
+                              <span className="text-slate-200 font-semibold">{item.count} 次</span>
+                              <span className="text-slate-400 w-9 text-right">{pct}%</span>
+                            </div>
+                          </div>
+                          <div className="h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full ${meta?.barColor || 'bg-violet-500'}`}
+                              style={{ width: `${Math.max(4, pct)}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>

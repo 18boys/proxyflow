@@ -13,9 +13,9 @@
     "publish": "npm publish --access public",
     "start": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
     "deploy": "npm run build && pm2 restart ecosystem.config.js --update-env",
-    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:start": "pm2 start ecosystem.config.js --update-env",
     "pm2:stop": "pm2 stop proxyflow-backend proxyflow-frontend",
-    "pm2:restart": "pm2 delete proxyflow-frontend && pm2 start ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js --update-env",
     "pm2:logs": "pm2 logs",
     "pm2:status": "pm2 list"
   },

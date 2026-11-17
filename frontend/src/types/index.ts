@@ -200,36 +200,12 @@ export interface StatsOverview {
         tool_name: string;
         count: number;
       }>;
-      recent_endpoints: string[];
-    }>;
-    endpoints: Array<{
-      endpoint: string;
-      method: string;
-      total_calls: number;
-      upsert_count: number;
-      inspect_count: number;
-      switch_toggle_count: number;
-      user_count: number;
-      users: string[];
-      tools: string[];
-      last_called_at: string;
     }>;
     tool_distribution: Array<{
       tool_name: string;
       count: number;
       user_count: number;
       last_called_at: string | null;
-    }>;
-    recent_calls: Array<{
-      id: number;
-      user_email: string;
-      token_name: string;
-      tool_name: string;
-      target_endpoint: string;
-      target_method: string;
-      status_code: number;
-      duration_ms: number;
-      created_at: string;
     }>;
   };
 }

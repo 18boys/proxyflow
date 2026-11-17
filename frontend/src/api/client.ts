@@ -238,8 +238,8 @@ export const mocksApi = {
   import: (mocks: unknown[]) => post<{ imported: number }>('/mocks/data/import', { mocks }),
   fromRequest: (requestId: number, name: string, versionName?: string, folderId?: number | null) =>
     post<import('../types').MockRule>('/mocks/from-request', { requestId, name, versionName, folderId }),
-  fromShared: (shareToken: string, name: string, versionName?: string, folderId?: number | null) =>
-    post<import('../types').MockRule>('/mocks/from-shared', { shareToken, name, versionName, folderId }),
+  fromShared: (shareToken: string, name: string, versionName?: string, folderId?: number | null, isActive?: boolean) =>
+    post<import('../types').MockRule>('/mocks/from-shared', { shareToken, name, versionName, folderId, isActive }),
   listFolders: () => get<import('../types').MockFolder[]>('/mocks/folders'),
   createFolder: (name: string) => post<import('../types').MockFolder>('/mocks/folders', { name }),
   updateFolder: (id: number, name: string) => put<import('../types').MockFolder>(`/mocks/folders/${id}`, { name }),

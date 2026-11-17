@@ -24,7 +24,7 @@ export default function SharedRequestPage() {
   const [mockFolderId, setMockFolderId] = useState<number | null>(null);
   const [mockFolders, setMockFolders] = useState<MockFolder[]>([]);
   const [saving, setSaving] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState<'active' | 'saved' | null>(null);
   const [curlCopied, setCurlCopied] = useState(false);
 
   useEffect(() => {
@@ -40,15 +40,15 @@ export default function SharedRequestPage() {
     mocksApi.listFolders().then(setMockFolders).catch(() => setMockFolders([]));
   }, [user]);
 
-  const handleSaveMock = async () => {
+  const handleSaveMock = async (activate = true) => {
     if (!token || !mockName.trim()) return;
     setSaving(true);
     try {
-      await mocksApi.fromShared(token, mockName.trim(), undefined, mockFolderId);
-      setSaveSuccess(true);
+      await mocksApi.fromShared(token, mockName.trim(), undefined, mockFolderId, activate);
+      setSaveSuccess(activate ? 'active' : 'saved');
       setShowSaveMock(false);
       setMockName('');
-      setTimeout(() => setSaveSuccess(false), 3000);
+      setTimeout(() => setSaveSuccess(null), 3000);
     } catch {
       // ignore
     } finally {
@@ -158,7 +158,7 @@ export default function SharedRequestPage() {
             <div className="flex-1" />
             {saveSuccess && (
               <span className="text-xs text-emerald-400 flex items-center gap-1">
-                <Check size={12} /> Saved to Mocks!
+                <Check size={12} /> {saveSuccess === 'active' ? 'Saved & Activated!' : 'Saved to Mocks!'}
               </span>
             )}
             {user ? (
@@ -192,7 +192,7 @@ export default function SharedRequestPage() {
                 placeholder="规则名称，例如：Get User API"
                 value={mockName}
                 onChange={(e) => setMockName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSaveMock()}
+                onKeyDown={(e) => e.key === 'Enter' && handleSaveMock(true)}
                 className="min-w-56 flex-1 bg-slate-900 border border-slate-600 text-slate-200 text-xs rounded px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-cyan-500 placeholder:text-slate-600"
                 autoFocus
               />
@@ -209,11 +209,18 @@ export default function SharedRequestPage() {
                 />
               </div>
               <button
-                onClick={handleSaveMock}
+                onClick={() => handleSaveMock(true)}
+                disabled={saving || !mockName.trim()}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded transition-colors disabled:opacity-50"
+              >
+                {saving ? '保存中...' : '保存并启用'}
+              </button>
+              <button
+                onClick={() => handleSaveMock(false)}
                 disabled={saving || !mockName.trim()}
                 className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs rounded transition-colors disabled:opacity-50"
               >
-                {saving ? '保存中...' : '保存'}
+                {saving ? '保存中...' : '仅保存'}
               </button>
               <button
                 onClick={() => { setShowSaveMock(false); setMockName(''); }}

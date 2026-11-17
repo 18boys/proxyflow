@@ -277,15 +277,6 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
     ORDER BY count DESC
   `);
 
-  const userEndpointsStmt = db.prepare(`
-    SELECT target_endpoint
-    FROM stats_mcp_calls
-    WHERE user_id = ? AND target_endpoint != '' AND target_endpoint != '*'
-    GROUP BY target_endpoint
-    ORDER BY COUNT(*) DESC, MAX(created_at) DESC
-    LIMIT 5
-  `);
-
   const mcpUsers = mcpUserRows.map((row) => {
     const tokens = userTokensStmt.all(row.user_id) as Array<{
       id: number;
@@ -295,67 +286,14 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
       revoked_at: string | null;
     }>;
     const topTools = userToolsStmt.all(row.user_id) as Array<{ tool_name: string; count: number }>;
-    const recentEndpoints = (userEndpointsStmt.all(row.user_id) as Array<{ target_endpoint: string }>).map(
-      (r) => r.target_endpoint
-    );
     return {
       ...row,
       tokens,
       top_tools: topTools,
-      recent_endpoints: recentEndpoints,
     };
   });
 
-  // 8b. MCP Target Endpoints ("用了哪些接口" — AI 操作过的具体业务 API)
-  const mcpEndpointRows = db.prepare(`
-    SELECT
-      mc.target_endpoint as endpoint,
-      CASE
-        WHEN COUNT(DISTINCT CASE WHEN mc.target_method != 'ANY' THEN mc.target_method END) = 1
-        THEN MAX(CASE WHEN mc.target_method != 'ANY' THEN mc.target_method END)
-        ELSE COALESCE(NULLIF(MAX(CASE WHEN mc.target_method != 'ANY' THEN mc.target_method END), ''), 'ANY')
-      END as method,
-      COUNT(*) as total_calls,
-      SUM(CASE WHEN mc.tool_name = 'upsert_mock' THEN 1 ELSE 0 END) as upsert_count,
-      SUM(CASE WHEN mc.tool_name IN ('wait_for_request', 'list_recent_requests', 'get_request') THEN 1 ELSE 0 END) as inspect_count,
-      SUM(CASE WHEN mc.tool_name IN ('switch_mock_version', 'toggle_mock', 'delete_mock') THEN 1 ELSE 0 END) as switch_toggle_count,
-      COUNT(DISTINCT mc.user_id) as user_count,
-      GROUP_CONCAT(DISTINCT u.email) as user_emails,
-      GROUP_CONCAT(DISTINCT mc.tool_name) as tool_names,
-      MAX(mc.created_at) as last_called_at
-    FROM stats_mcp_calls mc
-    JOIN users u ON u.id = mc.user_id
-    WHERE mc.target_endpoint != '' AND mc.target_endpoint != '*'
-    GROUP BY mc.target_endpoint
-    ORDER BY total_calls DESC, last_called_at DESC
-    LIMIT 30
-  `).all() as Array<{
-    endpoint: string;
-    method: string;
-    total_calls: number;
-    upsert_count: number;
-    inspect_count: number;
-    switch_toggle_count: number;
-    user_count: number;
-    user_emails: string | null;
-    tool_names: string | null;
-    last_called_at: string;
-  }>;
-
-  const mcpEndpoints = mcpEndpointRows.map((r) => ({
-    endpoint: r.endpoint,
-    method: r.method || 'ANY',
-    total_calls: r.total_calls,
-    upsert_count: r.upsert_count,
-    inspect_count: r.inspect_count,
-    switch_toggle_count: r.switch_toggle_count,
-    user_count: r.user_count,
-    users: r.user_emails ? r.user_emails.split(',').filter(Boolean) : [],
-    tools: r.tool_names ? r.tool_names.split(',').filter(Boolean) : [],
-    last_called_at: r.last_called_at,
-  }));
-
-  // 8c. MCP Tool Distribution (8 MCP Tools)
+  // 8b. MCP Tool Distribution (8 MCP Tools)
   const mcpToolDistribution = db.prepare(`
     SELECT
       tool_name,
@@ -370,34 +308,6 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
     count: number;
     user_count: number;
     last_called_at: string | null;
-  }>;
-
-  // 8d. Recent MCP Call Stream (最近调用流水)
-  const mcpRecentCalls = db.prepare(`
-    SELECT
-      mc.id,
-      u.email as user_email,
-      mc.token_name,
-      mc.tool_name,
-      mc.target_endpoint,
-      mc.target_method,
-      mc.status_code,
-      mc.duration_ms,
-      mc.created_at
-    FROM stats_mcp_calls mc
-    JOIN users u ON u.id = mc.user_id
-    ORDER BY mc.created_at DESC, mc.id DESC
-    LIMIT 30
-  `).all() as Array<{
-    id: number;
-    user_email: string;
-    token_name: string;
-    tool_name: string;
-    target_endpoint: string;
-    target_method: string;
-    status_code: number;
-    duration_ms: number;
-    created_at: string;
   }>;
 
   const mockedTotal = totals.mocked_requests || 0;
@@ -443,9 +353,7 @@ router.get('/overview', requireAuth, (req: AuthRequest, res: Response): void => 
       write_calls: mcpSummaryRow?.write_calls || 0,
       read_calls: mcpSummaryRow?.read_calls || 0,
       users: mcpUsers,
-      endpoints: mcpEndpoints,
       tool_distribution: mcpToolDistribution,
-      recent_calls: mcpRecentCalls,
     },
   });
 });

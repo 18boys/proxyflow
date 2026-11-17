@@ -558,7 +558,7 @@ router.post('/data/import', requireAuth, (req: AuthRequest, res: Response): void
 
 // POST /api/mocks/from-shared - create mock from a shared request (no ownership check)
 router.post('/from-shared', requireAuth, (req: AuthRequest, res: Response): void => {
-  const { shareToken, name, versionName, folderId: folderIdValue } = req.body;
+  const { shareToken, name, versionName, folderId: folderIdValue, isActive } = req.body;
 
   if (!shareToken || !name) {
     res.status(400).json({ error: 'shareToken and name are required' });
@@ -591,9 +591,9 @@ router.post('/from-shared', requireAuth, (req: AuthRequest, res: Response): void
   }
 
   const ruleResult = db.prepare(`
-    INSERT INTO mock_rules (user_id, folder_id, name, url_pattern, match_type, method, created_at, updated_at)
-    VALUES (?, ?, ?, ?, 'wildcard', ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
-  `).run(req.userId!, folderId, name, urlPattern, log['method'] as string);
+    INSERT INTO mock_rules (user_id, folder_id, name, url_pattern, match_type, method, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'wildcard', ?, ?, datetime('now', '+8 hours'), datetime('now', '+8 hours'))
+  `).run(req.userId!, folderId, name, urlPattern, log['method'] as string, isActive ? 1 : 0);
 
   const ruleId = ruleResult.lastInsertRowid;
 
