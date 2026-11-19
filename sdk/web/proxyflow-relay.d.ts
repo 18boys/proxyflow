@@ -10,12 +10,17 @@ export interface RelayOptions {
 }
 
 export interface VitePluginOptions extends RelayOptions {
-  /** 拦截的前缀路径，默认 '/api' */
-  prefix?: string;
+  /** 拦截的路径前缀，默认 '/api'；可传数组，如 ['/api', '/op']。'/api' 不会误匹配 '/apixx' */
+  prefix?: string | string[];
+  /**
+   * 返回 true 时不转发，交给下一个中间件（如 Vite 的 server.proxy）。
+   * 默认跳过 multipart/form-data 与 application/octet-stream：proxyflow 只支持字符串 body，二进制上传会损坏
+   */
+  skip?: (req: IncomingMessage) => boolean;
 }
 
 /**
- * 通用 Dev Server / BFF 转发函数：将请求打包转发到 Proxyflow /api/relay
+ * 通用 Dev Server / BFF 转发函数：将请求打包 POST 到 Proxyflow /api/relay
  */
 export function relayToProxyflow(
   req: IncomingMessage,
@@ -24,10 +29,11 @@ export function relayToProxyflow(
 ): Promise<void>;
 
 /**
- * Vite 插件：一行集成 Proxyflow 转发中间件
+ * Vite 插件：放在 Vite 配置顶层的 plugins 数组里，仅在 dev server（apply: 'serve'）生效
  */
 export function proxyflowPlugin(options: VitePluginOptions): {
   name: string;
+  apply: 'serve';
   configureServer: (server: any) => void;
 };
 

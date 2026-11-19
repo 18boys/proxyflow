@@ -1,12 +1,50 @@
 import { Router, Request, Response } from 'express';
 import https from 'https';
 import http from 'http';
+import zlib from 'zlib';
 import { getDb } from '../db';
 import { findMatchingMock, saveRequestLog } from '../proxy';
 import { wsManager } from '../websocket';
 import { safeStatus, parseHeaders } from '../mockUtils';
 
 const router = Router();
+
+/**
+ * 组装转发给上游的请求头：
+ * - host 改成目标环境
+ * - 去掉 hop-by-hop 头
+ * - 去掉 accept-encoding：响应会被整体读入再回写，且回写时不保留 content-encoding，
+ *   让上游尽量返回未压缩内容（仍被压缩时由 decodeResponseBody 解压）
+ * - content-length 按实际写出的 body 重新计算（body 经过 JSON 信封转成字符串，长度可能变化）
+ */
+function buildForwardHeaders(
+  normalizedHeaders: Record<string, string>,
+  targetUrl: URL,
+  reqBody: string | null
+): Record<string, string> {
+  const forwardHeaders: Record<string, string> = { ...normalizedHeaders, host: targetUrl.host };
+  delete forwardHeaders['connection'];
+  delete forwardHeaders['keep-alive'];
+  delete forwardHeaders['proxy-connection'];
+  delete forwardHeaders['transfer-encoding'];
+  delete forwardHeaders['accept-encoding'];
+  delete forwardHeaders['content-length'];
+  if (reqBody) forwardHeaders['content-length'] = String(Buffer.byteLength(reqBody));
+  return forwardHeaders;
+}
+
+/** 上游无视 accept-encoding 仍返回压缩内容时解压；解压失败原样返回 */
+function decodeResponseBody(buffer: Buffer, contentEncoding: string | undefined): Buffer {
+  const encoding = (contentEncoding || '').trim().toLowerCase();
+  try {
+    if (encoding === 'gzip' || encoding === 'x-gzip') return zlib.gunzipSync(buffer);
+    if (encoding === 'deflate') return zlib.inflateSync(buffer);
+    if (encoding === 'br') return zlib.brotliDecompressSync(buffer);
+  } catch {
+    return buffer;
+  }
+  return buffer;
+}
 
 /** 设置 CORS 头：保留原始 headers，只覆盖跨域相关字段 */
 function applyCorsHeaders(
@@ -143,9 +181,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         // Forward the request silently without logging
         const isHttps = targetUrl.protocol === 'https:';
         const lib = isHttps ? https : http;
-        const forwardHeaders: Record<string, string> = { ...normalizedHeaders, host: targetUrl.host };
-        delete forwardHeaders['connection'];
-        delete forwardHeaders['transfer-encoding'];
+        const forwardHeaders = buildForwardHeaders(normalizedHeaders, targetUrl, reqBody);
 
         const options: http.RequestOptions = {
           hostname: targetUrl.hostname,
@@ -157,9 +193,20 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
         };
 
         const proxyReq = lib.request(options, (proxyRes) => {
-          applyCorsHeaders(req, res, proxyRes.headers as Record<string, string>);
-          res.status(proxyRes.statusCode ?? 200);
-          proxyRes.pipe(res);
+          const chunks: Buffer[] = [];
+          proxyRes.on('data', (chunk: Buffer) => chunks.push(chunk));
+          proxyRes.on('end', () => {
+            const responseHeaders: Record<string, string> = {};
+            for (const [k, v] of Object.entries(proxyRes.headers)) {
+              if (v && k !== 'set-cookie') responseHeaders[k] = Array.isArray(v) ? v.join(', ') : v;
+            }
+            delete responseHeaders['transfer-encoding'];
+            delete responseHeaders['content-length'];
+            const body = decodeResponseBody(Buffer.concat(chunks), responseHeaders['content-encoding']);
+            applyCorsHeaders(req, res, responseHeaders);
+            if (proxyRes.headers['set-cookie']) res.setHeader('set-cookie', proxyRes.headers['set-cookie']);
+            res.status(proxyRes.statusCode ?? 200).send(body);
+          });
         });
 
         proxyReq.on('error', (err: Error) => {
@@ -226,10 +273,7 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   let socketConnectedAt: number | undefined;
   let firstByteAt: number | undefined;
 
-  const forwardHeaders: Record<string, string> = { ...normalizedHeaders, host: targetUrl.host };
-  // Remove hop-by-hop headers
-  delete forwardHeaders['connection'];
-  delete forwardHeaders['transfer-encoding'];
+  const forwardHeaders = buildForwardHeaders(normalizedHeaders, targetUrl, reqBody);
 
   const options: http.RequestOptions = {
     hostname: targetUrl.hostname,
@@ -252,10 +296,12 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
           if (v) responseHeaders[k] = Array.isArray(v) ? v.join(', ') : v;
         }
         delete responseHeaders['transfer-encoding'];
+        // 回写时不保留 content-encoding（见 applyCorsHeaders），body 必须是解压后的；长度由 express 重新计算
+        delete responseHeaders['content-length'];
 
         const contentType = String(responseHeaders['content-type'] || '');
         const isBinary = isBinaryContentType(contentType);
-        const responseBuffer = Buffer.concat(chunks);
+        const responseBuffer = decodeResponseBody(Buffer.concat(chunks), responseHeaders['content-encoding']);
 
         let responseBodyForLog: string;
         if (isBinary) {
@@ -293,7 +339,10 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
           await wsManager.broadcastToAll({ type: 'new_request', log });
         }
 
-        applyCorsHeaders(req, res, responseHeaders);
+        // 多个 Set-Cookie 不能合并成一行回写，否则浏览器只认第一个
+        const { 'set-cookie': _setCookie, ...headersForResponse } = responseHeaders;
+        applyCorsHeaders(req, res, headersForResponse);
+        if (proxyRes.headers['set-cookie']) res.setHeader('set-cookie', proxyRes.headers['set-cookie']);
         res.status(proxyRes.statusCode ?? 200).send(responseBuffer);
         resolve();
       });

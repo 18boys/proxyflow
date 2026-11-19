@@ -1,6 +1,6 @@
 {
   "name": "@proxyflow/web-sdk",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "proxyflow Web SDK — 浏览器 fetch 请求拦截与 Mock",
   "main": "proxyflow-web-sdk.js",
   "types": "proxyflow-web-sdk.d.ts",

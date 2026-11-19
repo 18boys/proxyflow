@@ -109,76 +109,40 @@ const data = await res.json();
 
 ---
 
-#### 核心转发工具：`proxyflow-relay.mjs`
+#### 核心转发工具：`@proxyflow/web-sdk/relay`
 
-在你的项目中新建 `proxyflow-relay.mjs`（或直接从 `@proxyflow/web-sdk/relay` 引入）：
+直接从包里引入（ESM / CommonJS 都支持），无需自己复制代码：
 
 ```javascript
-// proxyflow-relay.mjs
-export async function relayToProxyflow(
-  req,
-  res,
-  {
-    targetEnv,
-    sessionId = process.env.PROXYFLOW_SESSION_ID,
-    proxyflowUrl = process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
-  } = {}
-) {
-  if (!sessionId) {
-    console.warn('[Proxyflow Relay] 警告: 未提供 sessionId，且 process.env.PROXYFLOW_SESSION_ID 为空。请在 .env.local 中配置 PROXYFLOW_SESSION_ID 或显式传入。');
-  }
-  const targetUrl = new URL(req.url, targetEnv).toString();
-  const chunks = [];
-  for await (const chunk of req) chunks.push(chunk);
-  const body = chunks.length > 0 ? Buffer.concat(chunks).toString('utf8') : null;
-
-  try {
-    const relayRes = await fetch(`${proxyflowUrl.replace(/\/$/, '')}/api/relay`, {
-      method: req.method,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        method: req.method,
-        url: targetUrl,
-        headers: req.headers, // 完整携带浏览器带过来的 Cookie 和所有请求头
-        body,
-        sessionId,
-      }),
-    });
-
-    res.statusCode = relayRes.status;
-    relayRes.headers.forEach((val, key) => {
-      if (key !== 'transfer-encoding' && key !== 'content-encoding') res.setHeader(key, val);
-    });
-    const data = await relayRes.arrayBuffer();
-    res.end(Buffer.from(data));
-  } catch (err) {
-    res.statusCode = 502;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: `Proxyflow relay failed: ${err.message}` }));
-  }
-}
-
-// Vite 插件辅助函数
-export function proxyflowPlugin({
-  targetEnv,
-  sessionId = process.env.PROXYFLOW_SESSION_ID,
-  proxyflowUrl = process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
-  prefix = '/api',
-} = {}) {
-  return {
-    name: 'vite-plugin-proxyflow',
-    configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        if (req.url?.startsWith(prefix)) {
-          relayToProxyflow(req, res, { targetEnv, sessionId, proxyflowUrl });
-        } else {
-          next();
-        }
-      });
-    },
-  };
-}
+import { relayToProxyflow, proxyflowPlugin } from '@proxyflow/web-sdk/relay';
+// 或 const { relayToProxyflow, proxyflowPlugin } = require('@proxyflow/web-sdk/relay');
 ```
+
+`relayToProxyflow(req, res, options)` 做的事：
+
+1. 读出原请求的 method / url / headers / body，拼成 JSON 信封，**固定用 `POST`** 发到 `${proxyflowUrl}/api/relay`（原请求的 method 放在信封的 `method` 字段里）；
+2. 请求头会做清洗后再转发：
+   - 去掉 `host`、`connection`、`content-length`、`transfer-encoding` 等逐跳头（由 proxyflow 按目标环境重新生成）；
+   - 去掉 `accept-encoding`，让上游返回未压缩内容；
+   - `origin` / `referer` 改写成目标环境的域名，避免后端按 `localhost` 来源做 CSRF / 跨域校验；
+   - `cookie`、`authorization` 等业务头原样透传；
+3. 响应原样回写给浏览器（去掉 `content-encoding` / `content-length`，多个 `Set-Cookie` 分开回写）；
+4. `Set-Cookie` 会去掉 `Domain` 属性，让登录态 Cookie 落在 dev server 的域名（如 `localhost`）上；dev server 是 http 时还会去掉 `Secure`、把 `SameSite=None` 改为 `Lax`。否则真实环境下发的 `Domain=qa.example.com` Cookie 会被浏览器直接丢弃，登录后下一个请求就 401。
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| `targetEnv` | ✅ | 未命中 Mock 时转发的真实环境，如 `https://qa.example.com`；请求路径原样拼在它后面 |
+| `sessionId` | | 设备 Session ID，默认读 `process.env.PROXYFLOW_SESSION_ID` |
+| `proxyflowUrl` | | proxyflow 服务地址，默认读 `process.env.PROXYFLOW_URL`，再默认 `http://172.31.0.8:9000` |
+
+`proxyflowPlugin(options)` 在上面基础上多两个参数：
+
+| 参数 | 说明 |
+|------|------|
+| `prefix` | 拦截的路径前缀，默认 `'/api'`，可传数组如 `['/api', '/op']`。`'/api'` 只匹配 `/api`、`/api/...`、`/api?...`，不会误伤 `/apixx` |
+| `skip(req)` | 返回 `true` 时不转发，交给下一个中间件（如 Vite 的 `server.proxy`）。默认跳过 `multipart/*` 和 `application/octet-stream` 上传，原因见下方「限制」 |
+
+> ⚠️ **限制：二进制请求体**。`/api/relay` 的信封只支持字符串 body，文件上传等二进制内容按 utf8 解码会损坏。`proxyflowPlugin` 默认把这类请求交给下一个中间件；自己调用 `relayToProxyflow` 时请自行判断。
 
 ---
 
@@ -214,18 +178,28 @@ export default defineConfig(({ mode }) => {
   const TARGET_ENV = env.API_ENV === 'dev' ? 'https://dev.example.com' : 'https://qa.example.com';
 
   return {
+    // 注意：放在顶层 plugins，不是 server.plugins（Vite 没有 server.plugins 这个配置）
+    plugins: [
+      proxyflowPlugin({
+        targetEnv: TARGET_ENV,
+        sessionId: env.PROXYFLOW_SESSION_ID, // 自动从 .env.local 读取，团队成员各配各的
+        proxyflowUrl: env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
+        prefix: '/api', // 多个前缀可传数组：['/api', '/op']
+      }),
+      // ...其他插件
+    ],
     server: {
-      plugins: [
-        proxyflowPlugin({
-          targetEnv: TARGET_ENV,
-          sessionId: env.PROXYFLOW_SESSION_ID, // 自动从 .env.local 读取，团队成员各配各的
-          proxyflowUrl: env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
-        }),
-      ],
+      // 可选：保留原来的 proxy。proxyflowPlugin 的中间件先执行，命中 prefix 的请求不会再走这里；
+      // 被 skip 的请求（如文件上传）会落到这里直连真实环境
+      proxy: {
+        '/api': { target: TARGET_ENV, changeOrigin: true },
+      },
     },
   };
 });
 ```
+
+插件只在 `vite dev` 时生效（`apply: 'serve'`），不会影响 `vite build` 的产物。
 
 ##### 2. Next.js 工程
 
@@ -245,19 +219,24 @@ async function handleRelay(request: NextRequest, { params }: { params: { path: s
   const targetUrl = `${TARGET_ENV}/api${path}${request.nextUrl.search}`;
   const body = request.method !== 'GET' && request.method !== 'HEAD' ? await request.text() : null;
 
+  // 去掉逐跳头和 accept-encoding，其余（cookie、authorization 等）原样透传
+  const DROP = new Set(['host', 'connection', 'content-length', 'transfer-encoding', 'accept-encoding']);
   const headers: Record<string, string> = {};
-  request.headers.forEach((val, key) => { headers[key.toLowerCase()] = val; });
+  request.headers.forEach((val, key) => {
+    if (!DROP.has(key.toLowerCase())) headers[key.toLowerCase()] = val;
+  });
 
   try {
     const relayRes = await fetch(`${PROXYFLOW_URL}/api/relay`, {
-      method: request.method,
+      method: 'POST', // /api/relay 固定 POST；原请求的 method 放在信封里
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ method: request.method, url: targetUrl, headers, body, sessionId: PROXYFLOW_SESSION_ID }),
     });
     const resHeaders = new Headers();
     relayRes.headers.forEach((val, key) => {
-      if (key !== 'transfer-encoding' && key !== 'content-encoding') resHeaders.set(key, val);
+      if (!['transfer-encoding', 'content-encoding', 'content-length', 'set-cookie'].includes(key)) resHeaders.set(key, val);
     });
+    relayRes.headers.getSetCookie().forEach((cookie) => resHeaders.append('set-cookie', cookie));
     return new NextResponse(await relayRes.arrayBuffer(), { status: relayRes.status, headers: resHeaders });
   } catch (err: any) {
     return NextResponse.json({ error: err.message }, { status: 502 });
@@ -322,7 +301,7 @@ module.exports = {
             targetEnv: TARGET_ENV,
             sessionId: process.env.PROXYFLOW_SESSION_ID, // 自动从本地 .env.local 获取，团队成员各配各的
             proxyflowUrl: process.env.PROXYFLOW_URL || 'http://172.31.0.8:9000',
-          });
+          }).catch(next);
         } else {
           next();
         }
@@ -458,6 +437,24 @@ proxyflow.enable();   // 重新启用
 sdk/web/
 ├── proxyflow-web-sdk.js    # SDK 主文件（UMD，支持 script 标签和 require）
 ├── proxyflow-web-sdk.d.ts  # TypeScript 类型定义
+├── proxyflow-relay.mjs     # Dev Server / BFF 转发（ESM），对应 @proxyflow/web-sdk/relay
+├── proxyflow-relay.cjs     # 同上（CommonJS），逻辑与 .mjs 保持一致
+├── proxyflow-relay.d.ts    # 转发工具类型定义
 ├── package.json
 └── README.md              # 本文档
 ```
+
+---
+
+## 更新日志
+
+### 1.0.3
+
+- **修复** `relayToProxyflow`：请求 `/api/relay` 时固定使用 `POST`。之前沿用原请求的 method，原请求是 GET/HEAD 时 `fetch` 会抛 `Request with GET/HEAD method cannot have body`，所有 GET 接口都会返回 502。
+- **修复** 不再透传 `host`、`content-length`、`accept-encoding` 等头：`accept-encoding` 会让上游返回 gzip，而 proxyflow 回写时不带 `content-encoding`，浏览器拿到的是乱码。
+- **修复** 回写响应时去掉 `content-length`（body 已被 fetch 解压，长度会变），多个 `Set-Cookie` 分开回写。
+- **修复** README 中 Vite 示例把插件放在了 `server.plugins`（Vite 不存在该配置，插件不会生效），改为顶层 `plugins`。
+- **新增** `proxyflowPlugin` 支持 `prefix` 数组、`skip(req)`；默认跳过 multipart / 二进制上传；仅在 dev server 生效（`apply: 'serve'`）；前缀匹配不再误伤 `/apixx`。
+- **新增** `origin` / `referer` 改写为目标环境域名；缺少 `targetEnv` 时返回明确错误。
+- **修复** 基于 Cookie 的登录态在 localhost 上写不进去：回写 `Set-Cookie` 时去掉 `Domain`，http 下去掉 `Secure` 并把 `SameSite=None` 降为 `Lax`。
+
