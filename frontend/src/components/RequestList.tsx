@@ -317,10 +317,8 @@ function RequestItem({
   if (req.response_body) {
     try {
       const parsed = JSON.parse(req.response_body);
-      if (parsed && typeof parsed === 'object') {
-        if (parsed.data && typeof parsed.data === 'object' && 'code' in parsed.data) {
-          businessCode = parsed.data.code;
-        } else if ('code' in parsed) {
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        if ('code' in parsed) {
           businessCode = parsed.code;
         }
 
