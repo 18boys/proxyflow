@@ -8,6 +8,7 @@ import { DEFAULT_MAX_BODY_CHARS, condenseRule, detailLog, summariseLog } from '.
 
 const PROXYFLOW_URL = process.env.PROXYFLOW_URL;
 const PROXYFLOW_TOKEN = process.env.PROXYFLOW_TOKEN;
+const PROXYFLOW_WEB_URL = process.env.PROXYFLOW_WEB_URL;
 
 if (!PROXYFLOW_URL || !PROXYFLOW_TOKEN) {
   console.error(
@@ -19,6 +20,21 @@ if (!PROXYFLOW_URL || !PROXYFLOW_TOKEN) {
 }
 
 const baseUrl = PROXYFLOW_URL.replace(/\/+$/, '');
+const webBaseUrl = PROXYFLOW_WEB_URL ? PROXYFLOW_WEB_URL.replace(/\/+$/, '') : '';
+
+function buildShareUrl(shareToken: string, backendShareUrl?: unknown): string {
+  if (webBaseUrl) return `${webBaseUrl}/share/${shareToken}`;
+  if (typeof backendShareUrl === 'string' && /^https?:\/\//i.test(backendShareUrl)) {
+    return backendShareUrl;
+  }
+  return `${baseUrl}/share/${shareToken}`;
+}
+
+function extractShareToken(input: string): string {
+  const trimmed = input.trim();
+  const match = trimmed.match(/\/share\/([^/?#]+)/i);
+  return match ? decodeURIComponent(match[1]) : trimmed;
+}
 const VERSION: string = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
@@ -87,7 +103,8 @@ const server = new McpServer(
       'proxyflow mocks HTTP APIs for a mobile/mini-program/web client. Typical loop when developing a new endpoint: ' +
       '(1) upsert_mock to serve a fake response immediately; (2) once the real backend exists, toggle_mock enabled=false, ' +
       'ask the user to trigger the call in the app, then wait_for_request (or list_recent_requests if it already fired) to see the real shape; ' +
-      '(3) upsert_mock with from_request_id to save the exact real response, or adjust the mock; (4) switch_mock_version to flip between ' +
+      '(3) upsert_mock with from_request_id to save the exact real response, or adjust the mock; (4) share_request to archive a verified real request ' +
+      'as a permanent share link (survives log cleanup; retrieve later with list_shared_requests / get_shared_request); (5) switch_mock_version to flip between ' +
       'scenarios (success / empty / error) and delete_mock to clean up. Only requests routed through a paired proxyflow device/session are mocked or captured.',
   },
 );
@@ -339,6 +356,116 @@ server.registerTool(
     return respond(
       await call('/api/mocks/delete-by-pattern', { method: 'POST', body: JSON.stringify(args) }),
       (b) => (b?.deleted_version ? { ...condenseRule(b), deleted_version: b.deleted_version } : b),
+    );
+  },
+);
+
+server.registerTool(
+  'share_request',
+  {
+    title: 'Archive a request as a permanent share link',
+    description:
+      'Create (or update) a permanent, read-only share link snapshot for a captured request log id (from wait_for_request or list_recent_requests). ' +
+      'Snapshots are persisted in a permanent archive table and survive the 7-day / 1000-row request log cleanup, making them ideal for archiving real backend ' +
+      'request/response examples agreed during integration. Sensitive auth headers (Authorization, Cookie, tokens, secrets) are redacted by default.',
+    inputSchema: {
+      request_id: z.number().int().positive().describe('Request log id (from wait_for_request / list_recent_requests).'),
+      title: z.string().max(160).optional().describe('Optional short title describing the archived requirement or API scenario.'),
+      note: z.string().max(2000).optional().describe('Optional notes (e.g., requirement context, backend field agreements).'),
+      redact_sensitive: z.boolean().optional()
+        .describe('Redact sensitive request/response headers (Authorization, Cookie, tokens) before storing the permanent public snapshot. Defaults to true.'),
+    },
+    annotations: WRITE_IDEMPOTENT,
+  },
+  async ({ request_id, title, note, redact_sensitive }) => {
+    const payload: Record<string, unknown> = {
+      redact_sensitive: redact_sensitive ?? true,
+    };
+    if (title !== undefined) payload['title'] = title;
+    if (note !== undefined) payload['note'] = note;
+
+    return respond(
+      await call(`/api/requests/${request_id}/share`, { method: 'POST', body: JSON.stringify(payload) }),
+      (b) => ({
+        share_token: b.share_token,
+        share_url: buildShareUrl(b.share_token, b.share_url),
+        share_path: b.share_path || `/share/${b.share_token}`,
+        title: b.title ?? null,
+        note: b.note ?? null,
+        redacted: Boolean(b.redacted),
+        created: Boolean(b.created),
+        created_at: b.created_at,
+        tip: 'Permanent snapshot saved: this link remains valid even after captured request logs are cleared or rotated. Anyone with the link can inspect it or convert it into a mock.',
+      }),
+    );
+  },
+);
+
+server.registerTool(
+  'list_shared_requests',
+  {
+    title: 'List permanently archived share links',
+    description:
+      'List your permanently archived request share links (newest first), optionally filtered by keyword matching title, note, URL, or method. ' +
+      'Use get_shared_request with a returned share_token to inspect the full archived request and response.',
+    inputSchema: {
+      search: z.string().optional().describe('Filter by title, note, URL, or HTTP method substring.'),
+      limit: z.number().int().min(1).max(50).optional().describe('Max archived entries to return. Default 20.'),
+    },
+    annotations: READ_ONLY,
+  },
+  async ({ search, limit }) => {
+    const params = new URLSearchParams();
+    if (search) params.set('search', search);
+    if (limit) params.set('limit', String(limit));
+    const qs = params.toString() ? `?${params}` : '';
+
+    return respond(
+      await call(`/api/shared/mine/list${qs}`, { method: 'GET' }),
+      (b) => ({
+        count: b.count ?? (Array.isArray(b.items) ? b.items.length : 0),
+        shared_requests: (Array.isArray(b.items) ? b.items : []).map((item: any) => ({
+          share_token: item.share_token,
+          share_url: buildShareUrl(item.share_token),
+          title: item.title ?? null,
+          note: item.note ?? null,
+          method: item.method,
+          url: item.url,
+          status: item.response_status,
+          source: item.is_mocked ? 'MOCK' : 'REAL',
+          redacted: Boolean(item.redacted),
+          created_at: item.created_at,
+        })),
+      }),
+    );
+  },
+);
+
+server.registerTool(
+  'get_shared_request',
+  {
+    title: 'Read a permanently archived shared request',
+    description:
+      'Fetch the full request/response details of a permanently archived share link by its share_token (or full /share/<token> URL). ' +
+      'Sensitive headers are redacted and large bodies are truncated.',
+    inputSchema: {
+      share_token: z.string().min(1).describe('Share token UUID or full /share/<token> URL.'),
+      max_body_chars: maxBodyField,
+    },
+    annotations: READ_ONLY,
+  },
+  async ({ share_token, max_body_chars }) => {
+    const token = extractShareToken(share_token);
+    return respond(
+      await call(`/api/shared/${encodeURIComponent(token)}`, { method: 'GET' }),
+      (log) => ({
+        share_token: log.share_token || token,
+        share_url: buildShareUrl(log.share_token || token),
+        title: log.title ?? null,
+        note: log.note ?? null,
+        archived_at: log.archived_at ?? log.created_at,
+        ...detailLog(log, max_body_chars ?? DEFAULT_MAX_BODY_CHARS),
+      }),
     );
   },
 );

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy, ChevronRight, Check, Sparkles, Clock } from 'lucide-react';
+import { X, Plus, Trash2, Bot, AlertCircle, WrapText, Copy, ChevronRight, Check, Sparkles, Clock, Globe, Lock } from 'lucide-react';
 import type { MockFolder, MockRule, MockVersion } from '../types';
 import { mocksApi, streamAiRequest } from '../api/client';
 import { useDialog } from '../context/DialogContext';
@@ -90,6 +90,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
   const [method, setMethod] = useState(rule?.method || '');
   const [folderId, setFolderId] = useState<number | null>(rule?.folder_id ?? defaultFolderId ?? null);
   const [folders, setFolders] = useState<MockFolder[]>([]);
+  const [isPublic, setIsPublic] = useState<boolean>(rule?.is_public !== 0);
   const [delayMs, setDelayMs] = useState(rule?.delay_ms ?? 0);
   const [condType, setCondType] = useState(rule?.condition_field_type || '');
   const [condKey, setCondKey] = useState(rule?.condition_field_key || '');
@@ -120,6 +121,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
       setMatchType(rule.match_type || 'exact');
       setMethod(rule.method || '');
       setFolderId(rule.folder_id ?? defaultFolderId ?? null);
+      setIsPublic(rule.is_public !== 0);
       setDelayMs(rule.delay_ms ?? 0);
       setCondType(rule.condition_field_type || '');
       setCondKey(rule.condition_field_key || '');
@@ -241,6 +243,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
             match_type: matchType,
             method: method || null,
             folder_id: folderId,
+            is_public: isPublic ? 1 : 0,
             delay_ms: delayMs,
             condition_field_type: condType || null,
             condition_field_key: condType ? (condKey || null) : null,
@@ -288,6 +291,7 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
           match_type: matchType,
           method: method || undefined,
           folder_id: folderId,
+          is_public: isPublic ? 1 : 0,
           delay_ms: delayMs,
           condition_field_type: condType || undefined,
           condition_field_key: condKey || undefined,
@@ -435,6 +439,30 @@ export default function MockEditor({ rule, initialVersionId, defaultFolderId, on
                     ]}
                   />
                 </div>
+              </div>
+
+              {/* Team visibility */}
+              <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-slate-800 bg-slate-800/40">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-slate-200 flex items-center gap-1.5">
+                    {isPublic ? <Globe size={13} className="text-cyan-400" /> : <Lock size={13} className="text-amber-400" />}
+                    <span>{isPublic ? '团队公开' : '仅自己可见'}</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {isPublic ? '默认公开，同事可在首页和团队共享中搜索并复制使用' : '已设为私有，其他人无法搜索或克隆此规则'}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPublic((v) => !v)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors shrink-0 ${
+                    isPublic
+                      ? 'bg-cyan-500/15 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/25'
+                      : 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
+                  }`}
+                >
+                  {isPublic ? '设为私有' : '设为公开'}
+                </button>
               </div>
             </div>
 

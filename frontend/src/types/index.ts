@@ -39,6 +39,10 @@ export interface RequestLog {
 
 export interface SharedRequest extends RequestLog {
   curl: string;
+  title?: string | null;
+  note?: string | null;
+  archived_at?: string;
+  redacted?: boolean;
 }
 
 export interface MockVersion {
@@ -57,7 +61,9 @@ export interface MockFolder {
   id: number;
   user_id: number;
   name: string;
+  is_public?: number;
   mock_count: number;
+  public_mock_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -79,22 +85,65 @@ export interface MockRule {
   user_id: number;
   folder_id: number | null;
   folder_name?: string | null;
+  folder_is_public?: number | null;
   name: string;
   url_pattern: string;
   match_type: 'exact' | 'wildcard' | 'regex';
   method: string | null;
   is_active: number;
+  is_public?: number;
   active_version_id: number | null;
   active_version: MockVersion | null;
   delay_ms: number;
   condition_field_type: string | null;
   condition_field_key: string | null;
   condition_field_value: string | null;
+  forked_from_rule_id?: number | null;
+  forked_from_email?: string | null;
+  owner_email?: string;
+  is_mine?: boolean;
+  already_forked?: boolean;
   version_count: number;
   versions?: MockVersion[];
   active_version_name?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface TeamMockFolderSummary {
+  id: number;
+  name: string;
+  mock_count: number;
+}
+
+export interface TeamMockOwner {
+  user_id: number;
+  email: string;
+  is_me: boolean;
+  public_rule_count: number;
+  unfiled_count: number;
+  folders: TeamMockFolderSummary[];
+}
+
+export interface TeamMocksResponse {
+  owners: TeamMockOwner[];
+  rules: MockRule[];
+  total_public_rules: number;
+  selected_folder: {
+    id: number;
+    name: string;
+    owner_id: number;
+    owner_email: string;
+  } | null;
+}
+
+export interface MatchedMocksResponse {
+  rules: MockRule[];
+  counts: {
+    all: number;
+    mine: number;
+    others: number;
+  };
 }
 
 export interface ApiToken {

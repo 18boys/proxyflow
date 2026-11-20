@@ -222,6 +222,36 @@ function resolveMcpCallInfo(req: Request, userId: number): {
     };
   }
 
+  const reqShareMatch = fullPath.match(/^\/api\/requests\/(\d+)\/share$/);
+  if (method === 'POST' && reqShareMatch) {
+    const reqId = Number(reqShareMatch[1]);
+    const log = db.prepare('SELECT path, url, method FROM request_logs WHERE id = ?').get(reqId) as
+      | { path: string; url: string; method: string }
+      | undefined;
+    return {
+      toolName: headerTool || 'share_request',
+      targetEndpoint: log ? cleanTargetEndpoint(log.path || log.url) : `#${reqId}`,
+      targetMethod: log ? cleanTargetMethod(log.method) : 'ANY',
+    };
+  }
+
+  if (method === 'GET' && fullPath === '/api/shared/mine/list') {
+    return {
+      toolName: headerTool || 'list_shared_requests',
+      targetEndpoint: query['search'] ? String(query['search']).trim() : '*',
+      targetMethod: 'ANY',
+    };
+  }
+
+  const sharedDetailMatch = fullPath.match(/^\/api\/shared\/([^/]+)$/);
+  if (method === 'GET' && sharedDetailMatch) {
+    return {
+      toolName: headerTool || 'get_shared_request',
+      targetEndpoint: `/share/${sharedDetailMatch[1]}`,
+      targetMethod: 'GET',
+    };
+  }
+
   return {
     toolName: headerTool || `${method.toLowerCase()}_${fullPath.replace(/^\/api\//, '').replace(/\//g, '_')}`,
     targetEndpoint: cleanTargetEndpoint(body['url_pattern'] || query['url_pattern'] || fullPath),

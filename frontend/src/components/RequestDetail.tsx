@@ -1,5 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
-import { Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2, RotateCw, RefreshCw, Send, Plus, AlertCircle, WrapText } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2,
+  RotateCw, RefreshCw, Send, Plus, AlertCircle, WrapText, Search, Globe,
+  Lock, GitFork, Eye, EyeOff, Users, Loader2,
+} from 'lucide-react';
 import type { MockFolder, RequestLog, MockRule, MockVersion } from '../types';
 import { getStatusColor, getStatusColorClass, getMethodColor, parseJson } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
@@ -476,48 +480,26 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   );
 }
 
-// ── URL matching helper ────────────────────────────────────────────────────
-function matchesRule(rule: MockRule, log: RequestLog): boolean {
-  if (rule.method && log.method && rule.method !== log.method) return false;
-  let path: string;
-  try {
-    path = new URL(log.url).pathname;
-  } catch {
-    path = log.url.split('?')[0];
-  }
-  let patternPath: string;
-  try {
-    patternPath = new URL(rule.url_pattern).pathname;
-  } catch {
-    patternPath = rule.url_pattern.split('?')[0];
-  }
-  if (rule.match_type === 'exact') {
-    return path === patternPath;
-  }
-  if (rule.match_type === 'wildcard') {
-    const regexStr = patternPath.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
-    try { return new RegExp(`^${regexStr}$`).test(path); } catch { return false; }
-  }
-  if (rule.match_type === 'regex') {
-    try { return new RegExp(rule.url_pattern).test(path); } catch { return false; }
-  }
-  return false;
-}
-
 // ── MockTab ────────────────────────────────────────────────────────────────
 function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: number }) {
   const { confirm, toast } = useDialog();
   const [rules, setRules] = useState<MockRule[]>([]);
   const [versions, setVersions] = useState<Record<number, MockVersion[]>>({});
   const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
+  const [scope, setScope] = useState<'all' | 'mine' | 'others'>('all');
   const [operating, setOperating] = useState<number | null>(null); // versionId being operated
-  // local state per rule: { activeVersionId, isActive }
+  const [forkingKey, setForkingKey] = useState<string | null>(null);
+  const [togglingVisibilityId, setTogglingVisibilityId] = useState<number | null>(null);
+  const [previewVersionId, setPreviewVersionId] = useState<number | null>(null);
+  // local state per own rule: { activeVersionId, isActive }
   const [localState, setLocalState] = useState<Record<number, { vid: number | null; active: boolean }>>({});
   const [editingMock, setEditingMock] = useState<{
     rule: MockRule;
     versionId: number;
   } | null>(null);
   const [deletingVersionId, setDeletingVersionId] = useState<number | null>(null);
+  const lastLoadedRequestKeyRef = useRef<string>('');
 
   const loadMockData = useCallback(async (silent = false) => {
     if (!silent) {
@@ -527,48 +509,99 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
       setLocalState({});
     }
     try {
-      const allRules = await mocksApi.list();
-      const matched = allRules.filter((rule) => matchesRule(rule, log));
+      const res = await mocksApi.match({ url: log.url, method: log.method });
+      const matched = res.rules || [];
       setRules(matched);
+
       const init: Record<number, { vid: number | null; active: boolean }> = {};
-      matched.forEach((r) => { init[r.id] = { vid: r.active_version_id, active: !!r.is_active }; });
-      setLocalState(init);
       const versionMap: Record<number, MockVersion[]> = {};
-      await Promise.all(matched.map(async (rule) => {
-        versionMap[rule.id] = await mocksApi.listVersions(rule.id);
-      }));
+      matched.forEach((r) => {
+        if (r.is_mine !== false) {
+          init[r.id] = { vid: r.active_version_id, active: !!r.is_active };
+        }
+        versionMap[r.id] = (r.versions || []) as MockVersion[];
+      });
+      setLocalState(init);
       setVersions(versionMap);
+    } catch (err) {
+      if (!silent) {
+        toast.error(err instanceof Error ? err.message : '加载匹配的 Mock 规则失败');
+      }
     } finally {
       if (!silent) {
         setLoading(false);
       }
     }
-  }, [log]);
+  }, [log.url, log.method, toast]);
 
   useEffect(() => {
-    void loadMockData(rules.length > 0);
-  }, [loadMockData, refreshTrigger]);
+    const requestKey = `${log.id}:${log.method}:${log.url}`;
+    const isSameRequest = lastLoadedRequestKeyRef.current === requestKey;
+    lastLoadedRequestKeyRef.current = requestKey;
+    if (!isSameRequest) {
+      setSearch('');
+      setScope('all');
+      setPreviewVersionId(null);
+    }
+    void loadMockData(isSameRequest);
+  }, [log.id, log.method, log.url, refreshTrigger, loadMockData]);
 
-  // Apply a version: enable this rule + disable all other matched rules
+  // Apply a version on an own rule: enable this rule + disable all other active own rules
   const handleApply = async (ruleId: number, versionId: number) => {
     setOperating(versionId);
     try {
-      // Disable all other active rules first
-      const otherActiveRules = rules.filter((r) => r.id !== ruleId && localState[r.id]?.active);
+      const otherActiveRules = rules.filter((r) => r.is_mine !== false && r.id !== ruleId && localState[r.id]?.active);
       await Promise.all(otherActiveRules.map((r) =>
         mocksApi.update(r.id, { is_active: 0 } as Partial<MockRule>)
       ));
-      // Enable this rule with the selected version
       await mocksApi.update(ruleId, { active_version_id: versionId, is_active: 1 } as Partial<MockRule>);
-      // Update local state
       setLocalState((prev) => {
         const next = { ...prev };
         otherActiveRules.forEach((r) => { next[r.id] = { ...next[r.id], active: false }; });
         next[ruleId] = { vid: versionId, active: true };
         return next;
       });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '启用 Mock 失败');
     } finally {
       setOperating(null);
+    }
+  };
+
+  // Fork another user's mock rule into own account and immediately activate the chosen version
+  const handleForkAndApply = async (rule: MockRule, version: MockVersion) => {
+    const key = `${rule.id}:${version.id}`;
+    setForkingKey(key);
+    try {
+      await mocksApi.fork({
+        sourceRuleId: rule.id,
+        versionId: version.id,
+        activate: true,
+        disableConflicting: true,
+        targetUrl: log.url,
+        targetMethod: log.method,
+      });
+      toast.success(`已复制「${rule.name}」到我的 Mock 并启用（${version.name}）`);
+      if (scope === 'others') setScope('all');
+      await loadMockData(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '复制并启用 Mock 失败');
+    } finally {
+      setForkingKey(null);
+    }
+  };
+
+  const handleToggleRuleVisibility = async (rule: MockRule) => {
+    const nextPublic = rule.is_public === 0;
+    setTogglingVisibilityId(rule.id);
+    try {
+      await mocksApi.setVisibility(rule.id, nextPublic);
+      setRules((prev) => prev.map((r) => (r.id === rule.id ? { ...r, is_public: nextPublic ? 1 : 0 } : r)));
+      toast.success(nextPublic ? '已设为团队公开' : '已设为仅自己可见');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '更新可见性失败');
+    } finally {
+      setTogglingVisibilityId(null);
     }
   };
 
@@ -607,12 +640,14 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
     }
   };
 
-  // Deactivate a rule (toggle off)
+  // Deactivate an own rule (toggle off)
   const handleDeactivate = async (ruleId: number) => {
     setOperating(localState[ruleId]?.vid ?? -1);
     try {
       await mocksApi.update(ruleId, { is_active: 0 } as Partial<MockRule>);
       setLocalState((prev) => ({ ...prev, [ruleId]: { ...prev[ruleId], active: false } }));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '停用 Mock 失败');
     } finally {
       setOperating(null);
     }
@@ -638,8 +673,31 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
     );
   }
 
-  // Only one rule can be active at a time — the first active one is "in effect"
-  const activeRuleId = rules.find((r) => localState[r.id]?.active)?.id ?? null;
+  const normalizedQuery = search.trim().toLowerCase();
+  const searchedRules = normalizedQuery
+    ? rules.filter((rule) => {
+        const versionNames = (versions[rule.id] || []).map((v) => v.name).join(' ');
+        const haystack = [
+          rule.name,
+          rule.url_pattern,
+          rule.folder_name,
+          rule.owner_email,
+          versionNames,
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(normalizedQuery);
+      })
+    : rules;
+
+  const myMatchedRules = searchedRules.filter((r) => r.is_mine !== false);
+  const otherMatchedRules = searchedRules.filter((r) => r.is_mine === false);
+  const visibleMyRules = scope === 'others' ? [] : myMatchedRules;
+  const visibleOtherRules = scope === 'mine' ? [] : otherMatchedRules;
+
+  // Only one own rule is visually marked "in effect"
+  const activeRuleId = rules.find((r) => r.is_mine !== false && localState[r.id]?.active)?.id ?? null;
 
   return (
     <div className="space-y-3">
@@ -649,89 +707,304 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
         </div>
       )}
 
-      {rules.map((rule) => {
-        const rs = localState[rule.id] ?? { vid: null, active: false };
-        const isRuleActive = rs.active;
-        const isEffective = rule.id === activeRuleId; // visually mark which rule is in effect
+      {/* Search & Scope Filter Bar (strictly within rules matching this request) */}
+      <div className="space-y-2 pb-1">
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="搜索匹配当前接口的 Mock（规则名 / 版本 / 作者）..."
+            className="input-field w-full text-xs pl-8 pr-7 py-1.5"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              aria-label="清空搜索"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-1.5">
+          {([
+            { key: 'all', label: `全部 (${searchedRules.length})` },
+            { key: 'mine', label: `我的 (${myMatchedRules.length})` },
+            { key: 'others', label: `他人公开 (${otherMatchedRules.length})` },
+          ] as const).map((chip) => (
+            <button
+              key={chip.key}
+              type="button"
+              onClick={() => setScope(chip.key)}
+              className={`px-2 py-0.5 rounded-md text-[11px] font-medium border transition-colors ${
+                scope === chip.key
+                  ? 'bg-cyan-600 text-white border-cyan-600'
+                  : 'bg-slate-800 text-slate-400 border-slate-700 hover:text-slate-200 hover:bg-slate-700'
+              }`}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      </div>
 
-        return (
-          <div key={rule.id} className={`border rounded-lg overflow-hidden transition-colors ${
-            isEffective ? 'border-emerald-500/40' : 'border-slate-700'
-          }`}>
-            {/* Rule header */}
-            <div className={`flex items-center gap-2 px-3 py-2 border-b ${
-              isEffective ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-slate-800/60 border-slate-700'
-            }`}>
-              <div className={`w-2 h-2 rounded-full shrink-0 ${isEffective ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-              <span className="text-xs font-medium text-slate-200 flex-1 truncate">{rule.name}</span>
-              {isEffective && (
-                <span className="text-[10px] text-emerald-400 shrink-0">In Effect</span>
+      {visibleMyRules.length === 0 && visibleOtherRules.length === 0 ? (
+        <div className="text-center py-8 text-slate-500 text-xs space-y-2">
+          <p>没有找到符合筛选条件的匹配 Mock</p>
+          {(search || scope !== 'all') && (
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setScope('all'); }}
+              className="px-2.5 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 transition-colors"
+            >
+              重置筛选
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Own matching rules */}
+          {visibleMyRules.length > 0 && (
+            <div className="space-y-2.5">
+              {visibleOtherRules.length > 0 && (
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                  <span>我的 Mock</span>
+                  <span className="text-slate-600 font-mono">({visibleMyRules.length})</span>
+                </div>
               )}
-              <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
-                rule.match_type === 'exact' ? 'bg-slate-700 text-slate-400' :
-                rule.match_type === 'wildcard' ? 'bg-blue-500/20 text-blue-400' :
-                'bg-purple-500/20 text-purple-400'
-              }`}>{rule.match_type}</span>
-              <span className="text-[10px] font-mono text-slate-500 shrink-0 max-w-32 truncate">{rule.url_pattern}</span>
-            </div>
 
-            {/* Versions */}
-            <div className="p-2 space-y-1">
-              {(versions[rule.id] || []).length === 0 ? (
-                <p className="text-xs text-slate-600 px-2 py-1 italic">No versions configured</p>
-              ) : (versions[rule.id] || []).map((v) => {
-                const isVersionActive = isRuleActive && rs.vid === v.id;
-                const isOperating = operating === v.id || (operating === -1 && rs.vid === v.id);
+              {visibleMyRules.map((rule) => {
+                const rs = localState[rule.id] ?? { vid: null, active: false };
+                const isRuleActive = rs.active;
+                const isEffective = rule.id === activeRuleId;
+                const isFolderPrivate = rule.folder_id !== null && rule.folder_is_public === 0;
+                const isRulePublic = rule.is_public !== 0;
+
                 return (
-                  <div key={v.id} className={`flex items-center gap-2 px-2 py-1.5 rounded border transition-colors ${
-                    isVersionActive
-                      ? 'bg-emerald-500/10 border-emerald-500/30'
-                      : 'border-transparent hover:border-slate-700 hover:bg-slate-800/40'
+                  <div key={rule.id} className={`border rounded-lg overflow-hidden transition-colors ${
+                    isEffective ? 'border-emerald-500/40' : 'border-slate-700'
                   }`}>
-                    <div className={`w-2 h-2 rounded-full shrink-0 ${isVersionActive ? 'bg-emerald-400' : 'bg-slate-600'}`} />
-                    <span className="text-xs text-slate-300 flex-1 truncate">{v.name}</span>
-                    <span className={`text-[10px] font-mono shrink-0 ${
-                      v.response_status >= 200 && v.response_status < 300 ? 'text-emerald-400' :
-                      v.response_status >= 400 ? 'text-red-400' : 'text-slate-400'
-                    }`}>{v.response_status}</span>
-                    <button
-                      onClick={() => setEditingMock({
-                        rule,
-                        versionId: v.id,
+                    {/* Rule header */}
+                    <div className={`flex items-center gap-2 px-3 py-2 border-b ${
+                      isEffective ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-slate-800/60 border-slate-700'
+                    }`}>
+                      <div className={`w-2 h-2 rounded-full shrink-0 ${isEffective ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-xs font-medium text-slate-200 truncate">{rule.name}</span>
+                          {rule.folder_name && (
+                            <span className="px-1.5 py-0.5 text-[10px] rounded bg-cyan-500/10 text-cyan-400 shrink-0">
+                              {rule.folder_name}
+                            </span>
+                          )}
+                          {rule.forked_from_email && (
+                            <span
+                              title={`复制自 ${rule.forked_from_email}`}
+                              className="px-1.5 py-0.5 text-[10px] rounded bg-purple-500/15 text-purple-400 shrink-0 flex items-center gap-0.5"
+                            >
+                              <GitFork size={9} /> {rule.forked_from_email.split('@')[0]}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {isEffective && (
+                        <span className="text-[10px] text-emerald-400 shrink-0">In Effect</span>
+                      )}
+                      {isFolderPrivate ? (
+                        <span
+                          title="所在文件夹已设为私有，他人不可见"
+                          className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 flex items-center gap-0.5 shrink-0"
+                        >
+                          <Lock size={9} /> 目录私有
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleToggleRuleVisibility(rule)}
+                          disabled={togglingVisibilityId === rule.id}
+                          title={isRulePublic ? '团队公开（点击设为私有）' : '仅自己可见（点击设为公开）'}
+                          className={`text-[10px] px-1.5 py-0.5 rounded flex items-center gap-0.5 transition-colors shrink-0 disabled:opacity-50 ${
+                            isRulePublic
+                              ? 'bg-slate-700/80 text-slate-400 hover:text-cyan-400'
+                              : 'bg-amber-500/15 text-amber-400 hover:bg-amber-500/25'
+                          }`}
+                        >
+                          {isRulePublic ? <Globe size={9} /> : <Lock size={9} />}
+                          {isRulePublic ? '公开' : '私有'}
+                        </button>
+                      )}
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
+                        rule.match_type === 'exact' ? 'bg-slate-700 text-slate-400' :
+                        rule.match_type === 'wildcard' ? 'bg-blue-500/20 text-blue-400' :
+                        'bg-purple-500/20 text-purple-400'
+                      }`}>{rule.match_type}</span>
+                      <span className="text-[10px] font-mono text-slate-500 shrink-0 max-w-32 truncate">{rule.url_pattern}</span>
+                    </div>
+
+                    {/* Versions */}
+                    <div className="p-2 space-y-1">
+                      {(versions[rule.id] || []).length === 0 ? (
+                        <p className="text-xs text-slate-600 px-2 py-1 italic">No versions configured</p>
+                      ) : (versions[rule.id] || []).map((v) => {
+                        const isVersionActive = isRuleActive && rs.vid === v.id;
+                        const isOperating = operating === v.id || (operating === -1 && rs.vid === v.id);
+                        return (
+                          <div key={v.id} className={`flex items-center gap-2 px-2 py-1.5 rounded border transition-colors ${
+                            isVersionActive
+                              ? 'bg-emerald-500/10 border-emerald-500/30'
+                              : 'border-transparent hover:border-slate-700 hover:bg-slate-800/40'
+                          }`}>
+                            <div className={`w-2 h-2 rounded-full shrink-0 ${isVersionActive ? 'bg-emerald-400' : 'bg-slate-600'}`} />
+                            <span className="text-xs text-slate-300 flex-1 truncate">{v.name}</span>
+                            <span className={`text-[10px] font-mono shrink-0 ${
+                              v.response_status >= 200 && v.response_status < 300 ? 'text-emerald-400' :
+                              v.response_status >= 400 ? 'text-red-400' : 'text-slate-400'
+                            }`}>{v.response_status}</span>
+                            <button
+                              onClick={() => setEditingMock({
+                                rule,
+                                versionId: v.id,
+                              })}
+                              title="Edit mock data"
+                              aria-label={`Edit ${v.name}`}
+                              className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors shrink-0 text-[10px]"
+                            >
+                              <Pencil size={11} /> Edit
+                            </button>
+                            <button
+                              onClick={() => handleDeleteVersion(rule.id, v.id)}
+                              disabled={deletingVersionId === v.id}
+                              title="Delete version"
+                              aria-label={`Delete ${v.name}`}
+                              className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50 text-[10px]"
+                            >
+                              <Trash2 size={11} /> Delete
+                            </button>
+                            <button
+                              onClick={() => isVersionActive ? handleDeactivate(rule.id) : handleApply(rule.id, v.id)}
+                              disabled={isOperating}
+                              className={`px-2 py-0.5 text-[10px] rounded transition-colors shrink-0 ${
+                                isVersionActive
+                                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-red-500/20 hover:text-red-400'
+                                  : 'bg-slate-700 hover:bg-cyan-600 text-slate-300 hover:text-white disabled:opacity-50'
+                              }`}
+                            >
+                              {isOperating ? '...' : isVersionActive ? 'Active' : 'Apply'}
+                            </button>
+                          </div>
+                        );
                       })}
-                      title="Edit mock data"
-                      aria-label={`Edit ${v.name}`}
-                      className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-slate-700 text-slate-500 hover:text-slate-200 transition-colors shrink-0 text-[10px]"
-                    >
-                      <Pencil size={11} /> Edit
-                    </button>
-                    <button
-                      onClick={() => handleDeleteVersion(rule.id, v.id)}
-                      disabled={deletingVersionId === v.id}
-                      title="Delete version"
-                      aria-label={`Delete ${v.name}`}
-                      className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-red-500/20 text-slate-500 hover:text-red-400 transition-colors shrink-0 disabled:opacity-50 text-[10px]"
-                    >
-                      <Trash2 size={11} /> Delete
-                    </button>
-                    <button
-                      onClick={() => isVersionActive ? handleDeactivate(rule.id) : handleApply(rule.id, v.id)}
-                      disabled={isOperating}
-                      className={`px-2 py-0.5 text-[10px] rounded transition-colors shrink-0 ${
-                        isVersionActive
-                          ? 'bg-emerald-500/20 text-emerald-400 hover:bg-red-500/20 hover:text-red-400'
-                          : 'bg-slate-700 hover:bg-cyan-600 text-slate-300 hover:text-white disabled:opacity-50'
-                      }`}
-                    >
-                      {isOperating ? '...' : isVersionActive ? 'Active' : 'Apply'}
-                    </button>
+                    </div>
                   </div>
                 );
               })}
             </div>
-          </div>
-        );
-      })}
+          )}
+
+          {/* Other team members' matching public rules */}
+          {visibleOtherRules.length > 0 && (
+            <div className={`space-y-2.5 ${visibleMyRules.length > 0 ? 'pt-2 border-t border-slate-800' : ''}`}>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-cyan-400">
+                  <Users size={12} />
+                  <span>其他人的公开 Mock</span>
+                  <span className="text-slate-500 font-mono">({visibleOtherRules.length})</span>
+                </div>
+                <span className="text-[10px] text-slate-500">使用将复制到你的名下并启用</span>
+              </div>
+
+              {visibleOtherRules.map((rule) => (
+                <div key={rule.id} className="border border-slate-700/80 rounded-lg overflow-hidden bg-slate-900/40">
+                  {/* Colleague rule header */}
+                  <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-700/80 bg-slate-800/50">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-xs font-medium text-slate-200 truncate">{rule.name}</span>
+                        {rule.owner_email && (
+                          <span className="px-1.5 py-0.5 text-[10px] rounded bg-blue-500/15 text-blue-400 font-mono truncate max-w-44">
+                            {rule.owner_email}
+                          </span>
+                        )}
+                        {rule.folder_name && (
+                          <span className="px-1.5 py-0.5 text-[10px] rounded bg-slate-700 text-slate-400 shrink-0">
+                            {rule.folder_name}
+                          </span>
+                        )}
+                        {rule.already_forked && (
+                          <span className="px-1.5 py-0.5 text-[10px] rounded bg-emerald-500/15 text-emerald-400 shrink-0">
+                            已复制过
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono shrink-0 ${
+                      rule.match_type === 'exact' ? 'bg-slate-700 text-slate-400' :
+                      rule.match_type === 'wildcard' ? 'bg-blue-500/20 text-blue-400' :
+                      'bg-purple-500/20 text-purple-400'
+                    }`}>{rule.match_type}</span>
+                    <span className="text-[10px] font-mono text-slate-500 shrink-0 max-w-28 truncate">{rule.url_pattern}</span>
+                  </div>
+
+                  {/* Versions (read-only + preview + fork & apply) */}
+                  <div className="p-2 space-y-1">
+                    {(versions[rule.id] || []).length === 0 ? (
+                      <p className="text-xs text-slate-600 px-2 py-1 italic">No versions configured</p>
+                    ) : (versions[rule.id] || []).map((v) => {
+                      const isPreviewOpen = previewVersionId === v.id;
+                      const isForking = forkingKey === `${rule.id}:${v.id}`;
+                      return (
+                        <div key={v.id} className="rounded border border-transparent hover:border-slate-700/80 hover:bg-slate-800/40 transition-colors">
+                          <div className="flex items-center gap-2 px-2 py-1.5">
+                            <span className="text-xs text-slate-300 flex-1 truncate">{v.name}</span>
+                            <span className={`text-[10px] font-mono shrink-0 ${
+                              v.response_status >= 200 && v.response_status < 300 ? 'text-emerald-400' :
+                              v.response_status >= 400 ? 'text-red-400' : 'text-slate-400'
+                            }`}>{v.response_status}</span>
+                            <button
+                              type="button"
+                              onClick={() => setPreviewVersionId(isPreviewOpen ? null : v.id)}
+                              className="flex items-center gap-1 px-1.5 py-1 rounded hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors shrink-0 text-[10px]"
+                              title={isPreviewOpen ? '收起预览' : '预览响应数据'}
+                            >
+                              {isPreviewOpen ? <EyeOff size={11} /> : <Eye size={11} />}
+                              {isPreviewOpen ? '收起' : '预览'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleForkAndApply(rule, v)}
+                              disabled={forkingKey !== null}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white border border-cyan-500/30 transition-colors shrink-0 disabled:opacity-50"
+                              title="复制此规则及其版本到你的名下并立即启用"
+                            >
+                              {isForking ? (
+                                <Loader2 size={10} className="animate-spin" />
+                              ) : (
+                                <GitFork size={10} />
+                              )}
+                              {isForking ? '复制中...' : '复制并启用'}
+                            </button>
+                          </div>
+                          {isPreviewOpen && (
+                            <div className="px-2 pb-2 pt-1 border-t border-slate-800/80">
+                              <JsonViewer
+                                data={parseJson(v.response_body) ?? v.response_body}
+                                maxHeight="220px"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
 
       {/* Same full editor used by /mocks */}
       {editingMock && (

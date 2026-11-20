@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useStore } from './store/useStore';
 import { DialogProvider } from './context/DialogContext';
 import Layout from './components/Layout';
@@ -15,7 +15,11 @@ import { authApi } from './api/client';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const token = useStore((s) => s.token);
-  if (!token) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  if (!token) {
+    const from = `${location.pathname}${location.search}`;
+    return <Navigate to="/login" state={{ from }} replace />;
+  }
   return <>{children}</>;
 }
 

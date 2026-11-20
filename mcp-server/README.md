@@ -14,6 +14,9 @@
 | `wait_for_request` | 阻塞等待匹配的真实请求经过代理并返回抓包结果。`lookback_ms` 可回溯已发生的请求，`only_real` 忽略被 mock 命中的请求；返回中 `source` 标明 MOCK/REAL，敏感请求头（Authorization/Cookie 等）自动打码，过大的 body 自动截断。 |
 | `list_recent_requests` | 最近抓到的请求摘要（id/时间/方法/URL/状态/来源），可按 URL、方法、状态（`404` / `5xx`）过滤。 |
 | `get_request` | 按 id 查看单个请求的完整详情（同样打码 + 截断）。 |
+| `share_request` | 将某条抓包请求归档为**永久分享链接**（存入独立归档表，不受抓包日志 7 天/1000 条自动清理影响）。支持填 `title`、`note` 记录联调需求上下文，默认对敏感认证头（Authorization/Cookie 等）自动脱敏。 |
+| `list_shared_requests` | 查看/搜索自己已归档的永久分享链接列表。 |
+| `get_shared_request` | 按 `share_token` 或完整 `/share/<token>` 链接读取永久归档的请求与响应详情。 |
 
 > 只有经过 proxyflow（已配对设备的 SDK relay，或带 `x-proxyflow-session` 头的代理请求）的流量才会被 mock / 抓取。
 > mock 只按 **pathname** 匹配（忽略域名和 query）；需要按 query/header/body 区分时用 `condition`。
@@ -103,6 +106,7 @@ claude mcp add proxyflow \
 |------|------|------|
 | `PROXYFLOW_URL` | 是 | proxyflow 后端地址，例如 `http://localhost:9000` |
 | `PROXYFLOW_TOKEN` | 是 | 在设置页生成的 API Token，`pf_` 开头 |
+| `PROXYFLOW_WEB_URL` | 否 | 前端控制台访问域名（如 `https://proxyflow.example.com`），用于 `share_request` 拼接完整的分享页面链接；未配置时回退使用后端的 `PUBLIC_BASE_URL` 或 `PROXYFLOW_URL` |
 
 ## 测试
 

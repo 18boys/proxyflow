@@ -119,8 +119,21 @@ export default function SharedRequestPage() {
           <span className="text-xl font-bold text-cyan-400">ProxyFlow</span>
           <span className="text-slate-600">·</span>
           <span className="text-sm text-slate-400">Shared Request</span>
+          {log.redacted && (
+            <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-amber-500/15 text-amber-400 border border-amber-500/20">
+              Auth Headers Redacted
+            </span>
+          )}
         </div>
-        <p className="text-xs text-slate-600 mb-6">{new Date(log.created_at).toLocaleString()}</p>
+        {log.title && (
+          <h1 className="text-lg font-semibold text-slate-100 mt-2">{log.title}</h1>
+        )}
+        {log.note && (
+          <p className="text-xs text-slate-400 bg-slate-800/60 border border-slate-700/70 rounded-lg px-3 py-2 mt-2 whitespace-pre-wrap leading-relaxed">
+            {log.note}
+          </p>
+        )}
+        <p className="text-xs text-slate-600 mt-2 mb-6">{new Date(log.created_at).toLocaleString()}</p>
 
         {/* Request summary + action bar */}
         <div className="bg-slate-800/60 border border-slate-700 rounded-xl p-4 mb-4">

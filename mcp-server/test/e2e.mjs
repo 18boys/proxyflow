@@ -64,8 +64,8 @@ const API = 'https://api.example.com';
 // ── 1. tool surface ───────────────────────────────────────────────────────
 section('1. Tool surface');
 const names = (await client.listTools()).tools.map((t) => t.name).sort();
-check('exposes 8 tools', names.length === 8, names);
-check('has the new tools', ['delete_mock', 'get_request', 'list_recent_requests', 'switch_mock_version'].every((n) => names.includes(n)));
+check('exposes 11 tools', names.length === 11, names);
+check('has the new tools', ['delete_mock', 'get_request', 'get_shared_request', 'list_recent_requests', 'list_shared_requests', 'share_request', 'switch_mock_version'].every((n) => names.includes(n)));
 
 // ── 2. upsert basics ──────────────────────────────────────────────────────
 section('2. upsert_mock');
@@ -216,6 +216,39 @@ r = await tool('list_recent_requests', { only_real: true, limit: 30 });
 check('only_real excludes mocked entries', r.data.requests.every((x) => x.source === 'REAL'), r.raw);
 r = await tool('get_request', { id: 99999999 });
 check('unknown request id → error', r.err, r.raw);
+
+// ── 8b. share_request / list_shared_requests / get_shared_request ─────────
+section('8b. Permanent share links (archive)');
+r = await tool('share_request', {
+  request_id: boomId,
+  title: 'Checkout 503 snapshot',
+  note: 'Confirmed with backend @bob',
+});
+check('creates permanent share link with title/note and default redaction', !r.err && Boolean(r.data.share_token) && r.data.share_url?.includes(`/share/${r.data.share_token}`) && r.data.redacted === true && r.data.title === 'Checkout 503 snapshot', r.raw);
+const shareToken = r.data.share_token;
+const shareUrl = r.data.share_url;
+
+// Public endpoint must NOT expose TOP-SECRET when redacted
+const publicShared = await (await fetch(`${BASE}/api/shared/${shareToken}`)).json();
+check('public shared snapshot redacts Authorization header', !JSON.stringify(publicShared).includes('TOP-SECRET') && publicShared.title === 'Checkout 503 snapshot' && publicShared.note === 'Confirmed with backend @bob', publicShared);
+
+// Idempotent re-share updates note without creating duplicate token
+r = await tool('share_request', {
+  request_id: boomId,
+  note: 'Updated note after review',
+});
+check('re-sharing same request reuses token and updates note', !r.err && r.data.share_token === shareToken && r.data.created === false && r.data.note === 'Updated note after review', r.raw);
+
+r = await tool('list_shared_requests', { search: 'Checkout' });
+check('list_shared_requests finds the archived snapshot', !r.err && r.data.count >= 1 && r.data.shared_requests.some((x) => x.share_token === shareToken && x.note === 'Updated note after review'), r.raw);
+
+// Clear request logs to verify permanent survival
+await fetch(`${BASE}/api/requests`, { method: 'DELETE', headers: { authorization: `Bearer ${jwt}` } });
+r = await tool('get_shared_request', { share_token: shareUrl });
+check('get_shared_request accepts full URL and survives request log cleanup', !r.err && r.data.share_token === shareToken && r.data.response?.body?.error === 'down' && !r.raw.includes('TOP-SECRET'), r.raw);
+
+r = await tool('share_request', { request_id: 99999999 });
+check('unknown request_id for share_request → error', r.err, r.raw);
 
 // ── 9. delete ─────────────────────────────────────────────────────────────
 section('9. delete_mock');

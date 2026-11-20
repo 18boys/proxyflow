@@ -1,9 +1,8 @@
 import { Router, Response } from 'express';
-import { randomUUID } from 'crypto';
 import { requireAuth, AuthRequest } from '../auth';
 import { getDb } from '../db';
 import { buildCurl, executeReplayRequest } from '../requestReplay';
-import { createSharedRequest } from '../sharedRequests';
+import { createOrUpdateSharedRequest } from '../sharedRequests';
 import { matchUrlPattern, saveRequestLog } from '../proxy';
 import { normalizeUrlPattern } from '../mockUtils';
 import { wsManager } from '../websocket';
@@ -186,7 +185,7 @@ router.get('/:id/curl', requireAuth, (req: AuthRequest, res: Response): void => 
   res.json({ curl: buildCurl(log) });
 });
 
-// POST /api/requests/:id/share - generate a permanent share token
+// POST /api/requests/:id/share - generate (or update) a permanent share link snapshot
 router.post('/:id/share', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
   const log = db.prepare(
@@ -198,20 +197,34 @@ router.post('/:id/share', requireAuth, (req: AuthRequest, res: Response): void =
     return;
   }
 
-  let shareToken = log['share_token'] as string | null;
-  if (!shareToken) {
-    shareToken = randomUUID();
-  }
-
-  const saveShare = db.transaction(() => {
-    db.prepare(
-      "UPDATE request_logs SET share_token = ?, updated_at = datetime('now', '+8 hours') WHERE id = ?"
-    ).run(shareToken, Number(req.params['id']));
-    createSharedRequest(shareToken!, log);
+  const body = (req.body && typeof req.body === 'object') ? (req.body as Record<string, unknown>) : {};
+  const result = createOrUpdateSharedRequest(log, {
+    title: body['title'],
+    note: body['note'],
+    redactSensitive: body['redact_sensitive'] === true,
   });
-  saveShare();
 
-  res.json({ share_token: shareToken });
+  const sharePath = `/share/${result.share_token}`;
+  const configuredOrigin = (process.env.PUBLIC_BASE_URL || '').trim().replace(/\/+$/, '');
+  const reqOrigin = typeof req.headers.origin === 'string' ? req.headers.origin.replace(/\/+$/, '') : '';
+  const forwardedProto = typeof req.headers['x-forwarded-proto'] === 'string'
+    ? req.headers['x-forwarded-proto'].split(',')[0].trim()
+    : req.protocol;
+  const host = typeof req.headers['x-forwarded-host'] === 'string'
+    ? req.headers['x-forwarded-host'].split(',')[0].trim()
+    : req.get('host');
+  const baseOrigin = configuredOrigin || reqOrigin || (host ? `${forwardedProto}://${host}` : '');
+
+  res.json({
+    share_token: result.share_token,
+    share_path: sharePath,
+    share_url: baseOrigin ? `${baseOrigin}${sharePath}` : sharePath,
+    title: result.title,
+    note: result.note,
+    redacted: result.redacted,
+    created: result.created,
+    created_at: result.created_at,
+  });
 });
 
 // POST /api/requests/:id/replay - re-execute request and record new log

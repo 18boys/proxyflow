@@ -206,12 +206,39 @@ export const mocksApi = {
     const qs = search ? `?search=${encodeURIComponent(search)}` : '';
     return get<import('../types').MockRule[]>(`/mocks${qs}`);
   },
+  match: (params: {
+    url: string;
+    method?: string;
+    search?: string;
+    scope?: 'all' | 'mine' | 'others';
+  }) => {
+    const searchParams = new URLSearchParams({ url: params.url });
+    if (params.method) searchParams.set('method', params.method);
+    if (params.search) searchParams.set('search', params.search);
+    if (params.scope) searchParams.set('scope', params.scope);
+    return get<import('../types').MatchedMocksResponse>(`/mocks/match?${searchParams.toString()}`);
+  },
+  listTeam: (params?: {
+    search?: string;
+    ownerId?: number | null;
+    folderId?: 'all' | 'unfiled' | number | null;
+  }) => {
+    const searchParams = new URLSearchParams();
+    if (params?.search) searchParams.set('search', params.search);
+    if (params?.ownerId) searchParams.set('ownerId', String(params.ownerId));
+    if (params?.folderId !== undefined && params?.folderId !== null && params?.folderId !== 'all') {
+      searchParams.set('folderId', String(params.folderId));
+    }
+    const qs = searchParams.toString() ? `?${searchParams.toString()}` : '';
+    return get<import('../types').TeamMocksResponse>(`/mocks/team${qs}`);
+  },
   create: (data: {
     name: string;
     url_pattern: string;
     folder_id?: number | null;
     match_type?: string;
     method?: string;
+    is_public?: boolean | number;
     delay_ms?: number;
     condition_field_type?: string;
     condition_field_key?: string;
@@ -219,7 +246,26 @@ export const mocksApi = {
   }) => post<import('../types').MockRule>('/mocks', data),
   update: (id: number, data: Partial<import('../types').MockRule>) =>
     put<import('../types').MockRule>(`/mocks/${id}`, data),
+  setVisibility: (id: number, isPublic: boolean) =>
+    patch<import('../types').MockRule>(`/mocks/${id}/visibility`, { is_public: isPublic }),
   delete: (id: number) => del(`/mocks/${id}`),
+  fork: (data: {
+    sourceRuleId: number;
+    versionId?: number;
+    folderId?: number | null;
+    preserveFolderName?: boolean;
+    activate?: boolean;
+    disableConflicting?: boolean;
+    targetUrl?: string;
+    targetMethod?: string;
+    name?: string;
+  }) => post<import('../types').MockRule>('/mocks/fork', data),
+  forkFolder: (data: {
+    sourceFolderId: number | 'unfiled';
+    sourceOwnerId?: number;
+    targetFolderName?: string;
+    activate?: boolean;
+  }) => post<{ folder: import('../types').MockFolder; cloned_rules: number }>('/mocks/fork-folder', data),
   listVersions: (id: number) =>
     get<import('../types').MockVersion[]>(`/mocks/${id}/versions`),
   createVersion: (id: number, data: {
@@ -234,15 +280,32 @@ export const mocksApi = {
     del<{ success: boolean; rule: import('../types').MockRule }>(`/mocks/${id}/versions/${vid}`),
   selectVersion: (id: number, vid: number) =>
     post(`/mocks/${id}/versions/${vid}/select`),
-  export: () => get<{ folders: import('../types').MockFolder[]; mocks: import('../types').MockRule[] }>('/mocks/data/export'),
-  import: (mocks: unknown[]) => post<{ imported: number }>('/mocks/data/import', { mocks }),
+  export: (folderId?: 'all' | 'unfiled' | number) => {
+    const qs = folderId && folderId !== 'all' ? `?folderId=${encodeURIComponent(String(folderId))}` : '';
+    return get<{
+      version?: string;
+      scope?: 'all' | 'unfiled' | 'folder';
+      folder_name?: string | null;
+      filename?: string;
+      folders: import('../types').MockFolder[];
+      mocks: import('../types').MockRule[];
+    }>(`/mocks/data/export${qs}`);
+  },
+  import: (mocks: unknown[], targetFolderId?: number | null) =>
+    post<{ imported: number }>('/mocks/data/import', {
+      mocks,
+      ...(targetFolderId !== undefined ? { targetFolderId } : {}),
+    }),
   fromRequest: (requestId: number, name: string, versionName?: string, folderId?: number | null) =>
     post<import('../types').MockRule>('/mocks/from-request', { requestId, name, versionName, folderId }),
   fromShared: (shareToken: string, name: string, versionName?: string, folderId?: number | null, isActive?: boolean) =>
     post<import('../types').MockRule>('/mocks/from-shared', { shareToken, name, versionName, folderId, isActive }),
   listFolders: () => get<import('../types').MockFolder[]>('/mocks/folders'),
-  createFolder: (name: string) => post<import('../types').MockFolder>('/mocks/folders', { name }),
+  createFolder: (name: string, isPublic = true) =>
+    post<import('../types').MockFolder>('/mocks/folders', { name, is_public: isPublic }),
   updateFolder: (id: number, name: string) => put<import('../types').MockFolder>(`/mocks/folders/${id}`, { name }),
+  setFolderVisibility: (id: number, isPublic: boolean) =>
+    patch<import('../types').MockFolder>(`/mocks/folders/${id}/visibility`, { is_public: isPublic }),
   deleteFolder: (id: number) => del(`/mocks/folders/${id}`),
 };
 
