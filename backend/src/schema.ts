@@ -138,6 +138,22 @@ export const SCHEMA: Record<string, Record<string, string>> = {
     created_at:   "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
   },
 
+  mcp_auth_requests: {
+    id:               'INTEGER PRIMARY KEY AUTOINCREMENT',
+    request_id:       'TEXT UNIQUE NOT NULL',
+    poll_secret_hash: 'TEXT NOT NULL',
+    user_code:        'TEXT NOT NULL',
+    client_name:      "TEXT NOT NULL DEFAULT 'ProxyFlow MCP'",
+    hostname:         "TEXT NOT NULL DEFAULT ''",
+    status:           "TEXT NOT NULL DEFAULT 'pending'",
+    user_id:          'INTEGER REFERENCES users(id)',
+    api_token_id:     'INTEGER REFERENCES api_tokens(id)',
+    issued_token:     'TEXT',
+    expires_at:       'TEXT NOT NULL',
+    created_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+    updated_at:       "TEXT NOT NULL DEFAULT (datetime('now', '+8 hours'))",
+  },
+
   // ── 历史统计归档表（每次请求实时增量更新，清理抓包明细不影响历史统计） ──
   stats_daily_rollup: {
     stat_date:            'TEXT PRIMARY KEY',

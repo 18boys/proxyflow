@@ -187,8 +187,11 @@ export default function SettingsPage() {
     }
   };
 
-  const tokenPlaceholder = revealedToken ?? 'pf_xxxxxxxxxxxxxxxxxxxxxxxx';
   const proxyflowUrl = window.location.origin;
+
+  const mcpEnvEntries = revealedToken
+    ? `        "PROXYFLOW_URL": "${proxyflowUrl}",\n        "PROXYFLOW_TOKEN": "${revealedToken}"`
+    : `        "PROXYFLOW_URL": "${proxyflowUrl}"`;
 
   const mcpConfigExample = `{
   "mcpServers": {
@@ -196,14 +199,15 @@ export default function SettingsPage() {
       "command": "npx",
       "args": ["-y", "@proxyflow/mcp-server"],
       "env": {
-        "PROXYFLOW_URL": "${proxyflowUrl}",
-        "PROXYFLOW_TOKEN": "${tokenPlaceholder}"
+${mcpEnvEntries}
       }
     }
   }
 }`;
 
-  const claudeCliCommand = `claude mcp add proxyflow --env PROXYFLOW_URL="${proxyflowUrl}" --env PROXYFLOW_TOKEN="${tokenPlaceholder}" -- npx -y @proxyflow/mcp-server`;
+  const claudeCliCommand = revealedToken
+    ? `claude mcp add proxyflow --env PROXYFLOW_URL="${proxyflowUrl}" --env PROXYFLOW_TOKEN="${revealedToken}" -- npx -y @proxyflow/mcp-server`
+    : `claude mcp add proxyflow --env PROXYFLOW_URL="${proxyflowUrl}" -- npx -y @proxyflow/mcp-server`;
 
   const agentPrompt = `请帮我在当前环境/项目中配置 Proxyflow MCP 工具：
 
@@ -215,7 +219,8 @@ ${mcpConfigExample}
 如果是 Claude Code，也可以直接在终端执行：
 ${claudeCliCommand}
 
-配置完成后，请帮我检查 MCP 连接状态并列出可用的 proxyflow 工具。`;
+说明：${revealedToken ? '已包含专属 Token。' : '无需手动配置 PROXYFLOW_TOKEN，首次调用工具时会自动跳转浏览器完成一键授权并本地保存凭证。'}
+配置完成后，请帮我调用 authorize 检查登录状态，并可调用 get_or_create_session 自动获取或生成项目所需的 PROXYFLOW_SESSION_ID。`;
 
   const changeProtocol = (nextProtocol: AiProtocol) => {
     const currentDefault = DEFAULT_ENDPOINTS[protocol];
@@ -816,9 +821,9 @@ ${claudeCliCommand}
 
               <div className="p-4 space-y-2.5">
                 {!revealedToken && (
-                  <p className="text-xs text-amber-400 flex items-center gap-1.5">
-                    <AlertCircle size={13} className="shrink-0" />
-                    提示：生成新 Token 后，下方配置模板与提示词会自动填入真实 Token。
+                  <p className="text-xs text-emerald-400 flex items-center gap-1.5">
+                    <CheckCircle2 size={13} className="shrink-0" />
+                    推荐：无需手动填写 Token，安装后首次调用 MCP 工具会自动打开浏览器一键授权并生成凭证；若需在无浏览器/CI 环境使用，可在上方手动生成 Token。
                   </p>
                 )}
 

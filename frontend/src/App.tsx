@@ -11,6 +11,7 @@ import DevicesPage from './pages/DevicesPage';
 import SharedRequestPage from './pages/SharedRequestPage';
 import SettingsPage from './pages/SettingsPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import McpAuthPage from './pages/McpAuthPage';
 import { authApi } from './api/client';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -70,6 +71,14 @@ export default function App() {
         <Route path="/login" element={<AuthPage />} />
         <Route path="/register" element={<AuthPage />} />
         <Route path="/share/:token" element={<SharedRequestPage />} />
+        <Route
+          path="/mcp-auth"
+          element={
+            <RequireAuth>
+              <McpAuthPage />
+            </RequireAuth>
+          }
+        />
         <Route
           path="/"
           element={

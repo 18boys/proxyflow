@@ -252,6 +252,22 @@ function resolveMcpCallInfo(req: Request, userId: number): {
     };
   }
 
+  if (method === 'GET' && fullPath === '/api/devices') {
+    return {
+      toolName: headerTool || 'list_sessions',
+      targetEndpoint: '*',
+      targetMethod: 'GET',
+    };
+  }
+
+  if (method === 'POST' && fullPath === '/api/devices/ensure') {
+    return {
+      toolName: headerTool || 'get_or_create_session',
+      targetEndpoint: typeof body['name'] === 'string' && body['name'].trim() ? body['name'].trim() : 'default',
+      targetMethod: 'POST',
+    };
+  }
+
   return {
     toolName: headerTool || `${method.toLowerCase()}_${fullPath.replace(/^\/api\//, '').replace(/\//g, '_')}`,
     targetEndpoint: cleanTargetEndpoint(body['url_pattern'] || query['url_pattern'] || fullPath),

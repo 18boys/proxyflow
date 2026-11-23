@@ -7,6 +7,7 @@ import { wsManager } from './websocket';
 import { createProxyServer } from './proxy';
 
 import authRouter from './routes/auth';
+import mcpAuthRouter from './routes/mcpAuth';
 import devicesRouter from './routes/devices';
 import requestsRouter from './routes/requests';
 import mocksRouter from './routes/mocks';
@@ -50,6 +51,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.text({ limit: '10mb' }));
 
 // ── API Routes ───────────────────────────────────────────────────────────
+app.use('/api/auth/mcp', mcpAuthRouter);
 app.use('/api/auth', authRouter);
 app.use('/api/devices', devicesRouter);
 app.use('/api/requests', requestsRouter);

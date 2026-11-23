@@ -1,26 +1,44 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import {
+  clearSavedCredential,
+  getCredentialsPath,
+  McpAuthManager,
+  type EnsureAuthResult,
+} from './auth.js';
 import { DEFAULT_MAX_BODY_CHARS, condenseRule, detailLog, summariseLog } from './format.js';
 
 const PROXYFLOW_URL = process.env.PROXYFLOW_URL;
 const PROXYFLOW_TOKEN = process.env.PROXYFLOW_TOKEN;
 const PROXYFLOW_WEB_URL = process.env.PROXYFLOW_WEB_URL;
+const DEFAULT_AUTH_WAIT_MS = (() => {
+  const raw = process.env.PROXYFLOW_AUTH_WAIT_MS;
+  if (raw === undefined || raw === '') return 45_000;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 45_000;
+})();
 
-if (!PROXYFLOW_URL || !PROXYFLOW_TOKEN) {
+if (!PROXYFLOW_URL) {
   console.error(
-    '[proxyflow-mcp] Missing required environment variables.\n' +
-    '  PROXYFLOW_URL   — proxyflow backend URL, e.g. http://localhost:9000\n' +
-    '  PROXYFLOW_TOKEN — API token generated from Settings → API Tokens (starts with "pf_")',
+    '[proxyflow-mcp] Missing required environment variable.\n' +
+    '  PROXYFLOW_URL   — proxyflow server URL, e.g. https://proxyflow.example.com or http://localhost:3100\n' +
+    '  PROXYFLOW_TOKEN — (optional) API token; if omitted, browser authorization triggers automatically on first use.',
   );
   process.exit(1);
 }
 
 const baseUrl = PROXYFLOW_URL.replace(/\/+$/, '');
 const webBaseUrl = PROXYFLOW_WEB_URL ? PROXYFLOW_WEB_URL.replace(/\/+$/, '') : '';
+const authManager = new McpAuthManager({
+  baseUrl,
+  webBaseUrl,
+  envToken: PROXYFLOW_TOKEN,
+});
 
 function buildShareUrl(shareToken: string, backendShareUrl?: unknown): string {
   if (webBaseUrl) return `${webBaseUrl}/share/${shareToken}`;
@@ -35,6 +53,7 @@ function extractShareToken(input: string): string {
   const match = trimmed.match(/\/share\/([^/?#]+)/i);
   return match ? decodeURIComponent(match[1]) : trimmed;
 }
+
 const VERSION: string = (() => {
   try {
     return JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
@@ -45,16 +64,21 @@ const VERSION: string = (() => {
 
 // ── HTTP plumbing ─────────────────────────────────────────────────────────
 
-interface ApiResult { ok: boolean; status: number; body: unknown }
+interface ApiResult {
+  ok: boolean;
+  status: number;
+  body: unknown;
+  authPrompt?: Extract<EnsureAuthResult, { ok: false }>;
+}
 
-async function call(pathname: string, init: RequestInit, timeoutMs = 15_000): Promise<ApiResult> {
+async function rawFetch(pathname: string, token: string, init: RequestInit, timeoutMs = 15_000): Promise<ApiResult> {
   try {
     const res = await fetch(`${baseUrl}${pathname}`, {
       ...init,
       signal: AbortSignal.timeout(timeoutMs),
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${PROXYFLOW_TOKEN}`,
+        Authorization: `Bearer ${token}`,
         ...(init.headers || {}),
       },
     });
@@ -75,6 +99,63 @@ async function call(pathname: string, init: RequestInit, timeoutMs = 15_000): Pr
   }
 }
 
+async function call(pathname: string, init: RequestInit, timeoutMs = 15_000): Promise<ApiResult> {
+  const authRes = await authManager.ensureAuthorized({
+    waitMs: DEFAULT_AUTH_WAIT_MS,
+    openBrowser: true,
+  });
+
+  if (!authRes.ok) {
+    return {
+      ok: false,
+      status: authRes.status === 'unreachable' ? 0 : 401,
+      body: {
+        auth_required: true,
+        status: authRes.status,
+        ...(authRes.auth_url ? { auth_url: authRes.auth_url } : {}),
+        ...(authRes.user_code ? { user_code: authRes.user_code } : {}),
+        ...(authRes.request_id ? { request_id: authRes.request_id } : {}),
+        ...(authRes.expires_at ? { expires_at: authRes.expires_at } : {}),
+        ...(authRes.browser_opened !== undefined ? { browser_opened: authRes.browser_opened } : {}),
+        message: authRes.message,
+      },
+      authPrompt: authRes,
+    };
+  }
+
+  const result = await rawFetch(pathname, authRes.token, init, timeoutMs);
+
+  // If a locally cached (auto-generated) token was revoked, clear it and re-trigger browser auth once.
+  if (result.status === 401 && authRes.source === 'credentials') {
+    clearSavedCredential(baseUrl);
+    const reauth = await authManager.ensureAuthorized({
+      force: true,
+      waitMs: DEFAULT_AUTH_WAIT_MS,
+      openBrowser: true,
+    });
+    if (reauth.ok) {
+      return rawFetch(pathname, reauth.token, init, timeoutMs);
+    }
+    return {
+      ok: false,
+      status: reauth.status === 'unreachable' ? 0 : 401,
+      body: {
+        auth_required: true,
+        status: reauth.status,
+        ...(reauth.auth_url ? { auth_url: reauth.auth_url } : {}),
+        ...(reauth.user_code ? { user_code: reauth.user_code } : {}),
+        ...(reauth.request_id ? { request_id: reauth.request_id } : {}),
+        ...(reauth.expires_at ? { expires_at: reauth.expires_at } : {}),
+        ...(reauth.browser_opened !== undefined ? { browser_opened: reauth.browser_opened } : {}),
+        message: `之前保存的凭证已失效，已重新发起授权。${reauth.message}`,
+      },
+      authPrompt: reauth,
+    };
+  }
+
+  return result;
+}
+
 type Content = { content: { type: 'text'; text: string }[]; isError?: true };
 
 function text(value: unknown): string {
@@ -82,9 +163,16 @@ function text(value: unknown): string {
 }
 
 function fail(result: ApiResult): Content {
+  if (result.authPrompt) {
+    return { isError: true, content: [{ type: 'text', text: text(result.body) }] };
+  }
   const detail = text(result.body);
   let hint = '';
-  if (result.status === 401) hint = '\nHint: PROXYFLOW_TOKEN was rejected — it may be revoked or mistyped. Generate a new one in the proxyflow console (Settings → API Tokens).';
+  if (result.status === 401) {
+    hint = authManager.hasEnvToken()
+      ? '\nHint: PROXYFLOW_TOKEN was rejected — it may be revoked or mistyped. Generate a new one in the proxyflow console (Settings → API Tokens), or remove PROXYFLOW_TOKEN from MCP config to use automatic browser authorization.'
+      : '\nHint: Call the `authorize` tool to sign in via browser and automatically generate a new token.';
+  }
   return { isError: true, content: [{ type: 'text', text: (result.status ? `HTTP ${result.status}: ` : '') + detail + hint }] };
 }
 
@@ -100,7 +188,10 @@ const server = new McpServer(
   { name: 'proxyflow-mcp', version: VERSION },
   {
     instructions:
-      'proxyflow mocks HTTP APIs for a mobile/mini-program/web client. Typical loop when developing a new endpoint: ' +
+      'proxyflow mocks HTTP APIs for a mobile/mini-program/web client. Auth is automatic: if no PROXYFLOW_TOKEN is set, the first tool call ' +
+      '(or calling `authorize`) opens the browser for one-click approval and persists the token locally. ' +
+      'To wire a client project / SDK / .env.local / debug backdoor to proxyflow, call `get_or_create_session` (or `list_sessions`) to automatically obtain ' +
+      'or create a `session_id` and server URLs. Typical API development loop: ' +
       '(1) upsert_mock to serve a fake response immediately; (2) once the real backend exists, toggle_mock enabled=false, ' +
       'ask the user to trigger the call in the app, then wait_for_request (or list_recent_requests if it already fired) to see the real shape; ' +
       '(3) upsert_mock with from_request_id to save the exact real response, or adjust the mock; (4) share_request to archive a verified real request ' +
@@ -470,18 +561,259 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  'authorize',
+  {
+    title: 'Authorize or check ProxyFlow MCP login',
+    description:
+      'Check ProxyFlow authorization status, initiate one-click browser authorization to automatically generate & save an API token locally ' +
+      '(no manual PROXYFLOW_TOKEN configuration needed), re-authorize as another account, or log out locally.',
+    inputSchema: {
+      mode: z.enum(['ensure', 'status', 'reauth', 'logout']).optional()
+        .describe('"ensure" (default): verify current token or trigger browser authorization; "status": check current login without opening browser; "reauth": force a fresh browser authorization; "logout": remove saved local token.'),
+      wait_seconds: z.number().int().min(0).max(120).optional()
+        .describe('Seconds to wait for browser approval when starting authorization (default 45; set 0 to return the auth_url immediately).'),
+      open_browser: z.boolean().optional()
+        .describe('Attempt to open the authorization URL in the local browser automatically. Defaults to true.'),
+    },
+    annotations: WRITE_IDEMPOTENT,
+  },
+  async ({ mode = 'ensure', wait_seconds, open_browser }) => {
+    const credentialsPath = getCredentialsPath();
+
+    if (mode === 'logout') {
+      const removed = clearSavedCredential(baseUrl);
+      return {
+        content: [{
+          type: 'text',
+          text: text({
+            logged_out: true,
+            removed_local_credential: removed,
+            env_token_still_set: authManager.hasEnvToken(),
+            credentials_path: credentialsPath,
+          }),
+        }],
+      };
+    }
+
+    if (mode === 'status') {
+      const active = authManager.getActiveToken();
+      if (!active) {
+        return {
+          content: [{
+            type: 'text',
+            text: text({
+              authorized: false,
+              server_url: baseUrl,
+              credentials_path: credentialsPath,
+              tip: 'Not authorized yet. Call `authorize` (or any proxyflow tool) to trigger automatic browser authorization.',
+            }),
+          }],
+        };
+      }
+      const me = await rawFetch('/api/auth/me', active.token, { method: 'GET' }, 8_000);
+      if (me.ok) {
+        return {
+          content: [{
+            type: 'text',
+            text: text({
+              authorized: true,
+              source: active.source,
+              user: me.body,
+              token_prefix: active.saved?.token_prefix || active.token.slice(0, 12),
+              server_url: baseUrl,
+              credentials_path: credentialsPath,
+            }),
+          }],
+        };
+      }
+      return {
+        content: [{
+          type: 'text',
+          text: text({
+            authorized: false,
+            source: active.source,
+            status: me.status,
+            error: me.body,
+            tip: 'Current token is invalid or revoked. Call `authorize` with mode="reauth" to generate a new token via browser.',
+          }),
+        }],
+      };
+    }
+
+    if (mode === 'reauth') {
+      clearSavedCredential(baseUrl);
+    }
+
+    const waitMs = wait_seconds !== undefined ? wait_seconds * 1000 : DEFAULT_AUTH_WAIT_MS;
+    const authRes = await authManager.ensureAuthorized({
+      force: mode === 'reauth',
+      waitMs,
+      openBrowser: open_browser !== false,
+    });
+
+    if (!authRes.ok) {
+      return {
+        content: [{
+          type: 'text',
+          text: text({
+            authorized: false,
+            status: authRes.status,
+            ...(authRes.auth_url ? { auth_url: authRes.auth_url } : {}),
+            ...(authRes.user_code ? { user_code: authRes.user_code } : {}),
+            ...(authRes.request_id ? { request_id: authRes.request_id } : {}),
+            ...(authRes.expires_at ? { expires_at: authRes.expires_at } : {}),
+            ...(authRes.browser_opened !== undefined ? { browser_opened: authRes.browser_opened } : {}),
+            message: authRes.message,
+          }),
+        }],
+      };
+    }
+
+    const me = await rawFetch('/api/auth/me', authRes.token, { method: 'GET' }, 8_000);
+    if (!me.ok && authRes.source === 'credentials') {
+      clearSavedCredential(baseUrl);
+      const retry = await authManager.ensureAuthorized({
+        force: true,
+        waitMs,
+        openBrowser: open_browser !== false,
+      });
+      if (!retry.ok) {
+        return { content: [{ type: 'text', text: text({ authorized: false, ...retry }) }] };
+      }
+      const me2 = await rawFetch('/api/auth/me', retry.token, { method: 'GET' }, 8_000);
+      return {
+        content: [{
+          type: 'text',
+          text: text({
+            authorized: me2.ok,
+            source: retry.source,
+            user: me2.ok ? me2.body : { email: retry.email },
+            token_prefix: retry.token_prefix,
+            default_session: retry.default_session ?? null,
+            credentials_path: retry.credentials_path,
+          }),
+        }],
+      };
+    }
+
+    return {
+      content: [{
+        type: 'text',
+        text: text({
+          authorized: me.ok,
+          source: authRes.source,
+          just_authorized: Boolean(authRes.just_authorized),
+          user: me.ok ? me.body : { email: authRes.email },
+          token_prefix: authRes.token_prefix || authRes.token.slice(0, 12),
+          ...(authRes.default_session !== undefined ? { default_session: authRes.default_session } : {}),
+          credentials_path: authRes.credentials_path,
+          tip: 'Authorized! Call `get_or_create_session` if you also need a session_id to configure your project SDK or debug backdoor.',
+        }),
+      }],
+    };
+  },
+);
+
+server.registerTool(
+  'list_sessions',
+  {
+    title: 'List paired device sessions',
+    description:
+      'List all ProxyFlow device sessions for the current user (with session_id, name, online status, and last_seen). ' +
+      'Use `get_or_create_session` to automatically obtain or create a session_id ready to configure in a project or debug backdoor.',
+    inputSchema: {},
+    annotations: READ_ONLY,
+  },
+  async () => respond(await call('/api/devices', { method: 'GET' }), (devices: any[]) => ({
+    count: Array.isArray(devices) ? devices.length : 0,
+    server_url: baseUrl,
+    relay_url: `${baseUrl}/api/relay`,
+    sessions: (Array.isArray(devices) ? devices : []).map((d) => ({
+      session_id: d.session_id,
+      name: d.name,
+      is_online: Boolean(d.is_online),
+      last_seen: d.last_seen ?? null,
+      created_at: d.created_at,
+    })),
+  })),
+);
+
+server.registerTool(
+  'get_or_create_session',
+  {
+    title: 'Get or create a device session ID',
+    description:
+      'Retrieve an existing ProxyFlow device session_id or automatically create a new one, returning the session_id together with ready-to-use ' +
+      'server_url, relay_url, ws_url, and .env.local snippet so an agent can automatically inject it into a project SDK, dev server proxy, or debug backdoor. ' +
+      'Idempotent by default: if `name` is provided, reuses an existing session with that name (or creates one); if omitted, reuses the most recently active session (or creates one if none exist).',
+    inputSchema: {
+      name: z.string().max(80).optional()
+        .describe('Optional device or project name (e.g. "web-admin", "ios-dev"). Reuses an existing session with the same name if present, otherwise creates one.'),
+      create_new: z.boolean().optional()
+        .describe('Set true to always create a brand-new device session instead of reusing an existing one. Defaults to false.'),
+    },
+    annotations: WRITE_IDEMPOTENT,
+  },
+  async ({ name, create_new }) => {
+    const effectiveName = name?.trim() || (create_new ? `${os.hostname() || 'MCP'} Device` : undefined);
+    return respond(
+      await call('/api/devices/ensure', {
+        method: 'POST',
+        body: JSON.stringify({
+          ...(effectiveName ? { name: effectiveName } : {}),
+          create_new: Boolean(create_new),
+        }),
+      }),
+      (b) => {
+        const serverUrl = baseUrl;
+        const relayUrl = `${serverUrl}/api/relay`;
+        const wsBase = serverUrl.replace(/^https:/i, 'wss:').replace(/^http:/i, 'ws:');
+        const wsUrl = `${wsBase}/ws/device?token=${b.pairing_token}`;
+        return {
+          session_id: b.session_id,
+          name: b.name,
+          created: Boolean(b.created),
+          is_online: Boolean(b.is_online),
+          last_seen: b.last_seen ?? null,
+          pairing_token: b.pairing_token,
+          server_url: serverUrl,
+          relay_url: relayUrl,
+          ws_url: wsUrl,
+          env_snippet: `PROXYFLOW_URL=${serverUrl}\nPROXYFLOW_SESSION_ID=${b.session_id}`,
+          tip: 'Inject `session_id` (and `server_url`) into your SDK init, `.env.local`, or app debug backdoor so requests route to your ProxyFlow account.',
+        };
+      },
+    );
+  },
+);
+
 // ── Startup ───────────────────────────────────────────────────────────────
 
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error(`[proxyflow-mcp] v${VERSION} connected — backend ${baseUrl}`);
+  console.error(`[proxyflow-mcp] v${VERSION} connected — server ${baseUrl}`);
 
   // Non-fatal preflight so misconfiguration shows up in the client's MCP logs right away.
-  const me = await call('/api/auth/me', { method: 'GET' }, 5_000);
-  if (me.ok) console.error('[proxyflow-mcp] token OK');
-  else if (me.status === 401) console.error('[proxyflow-mcp] WARNING: PROXYFLOW_TOKEN was rejected by the backend (invalid or revoked).');
-  else console.error(`[proxyflow-mcp] WARNING: ${text(me.body)}`);
+  const active = authManager.getActiveToken();
+  if (!active) {
+    console.error(`[proxyflow-mcp] no token yet — will automatically open browser authorization on first tool call (credentials file: ${getCredentialsPath()})`);
+    return;
+  }
+  const me = await rawFetch('/api/auth/me', active.token, { method: 'GET' }, 5_000);
+  if (me.ok) {
+    const email = (me.body as { email?: string })?.email;
+    console.error(`[proxyflow-mcp] token OK (${active.source}${email ? `, ${email}` : ''})`);
+  } else if (me.status === 401) {
+    if (active.source === 'credentials') {
+      console.error('[proxyflow-mcp] saved token expired/revoked — will automatically re-authorize on next tool call.');
+    } else {
+      console.error('[proxyflow-mcp] WARNING: PROXYFLOW_TOKEN was rejected by the backend (invalid or revoked).');
+    }
+  } else {
+    console.error(`[proxyflow-mcp] WARNING: ${text(me.body)}`);
+  }
 }
 
 main().catch((err) => {

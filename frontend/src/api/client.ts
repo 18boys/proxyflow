@@ -391,6 +391,34 @@ export const tokensApi = {
   revoke: (id: number) => del<{ success: boolean }>(`/tokens/${id}`),
 };
 
+export interface McpAuthRequestInfo {
+  request_id: string;
+  user_code: string;
+  client_name: string;
+  hostname: string;
+  status: 'pending' | 'approved' | 'denied' | 'claimed' | 'expired';
+  expires_at: string;
+  created_at: string;
+  user_email: string;
+  has_device_session: boolean;
+}
+
+export const mcpAuthApi = {
+  getRequest: (requestId: string) =>
+    get<McpAuthRequestInfo>(`/auth/mcp/request/${encodeURIComponent(requestId)}`),
+  approve: (data: { request_id: string; token_name?: string; ensure_session?: boolean }) =>
+    post<{
+      success: boolean;
+      status: 'approved';
+      token_name: string;
+      token_prefix: string;
+      user_email: string;
+      created_session_id: string | null;
+    }>('/auth/mcp/approve', data),
+  deny: (requestId: string) =>
+    post<{ success: boolean; status: 'denied' }>('/auth/mcp/deny', { request_id: requestId }),
+};
+
 // ── Settings ──────────────────────────────────────────────────────────────
 export const settingsApi = {
   get: () => get<{ exclusion_domains: string[] }>('/settings'),

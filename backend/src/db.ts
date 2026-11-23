@@ -82,6 +82,7 @@ function syncSchema(database: Database): void {
     database.exec('CREATE INDEX IF NOT EXISTS idx_mock_rules_public ON mock_rules(is_public, user_id);');
     database.exec('CREATE INDEX IF NOT EXISTS idx_mock_versions_rule_id ON mock_versions(rule_id);');
     database.exec('CREATE INDEX IF NOT EXISTS idx_shared_requests_owner ON shared_requests(owner_user_id, created_at DESC);');
+    database.exec('CREATE INDEX IF NOT EXISTS idx_mcp_auth_requests_status ON mcp_auth_requests(status, expires_at);');
     database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_daily_actors_uniq ON stats_daily_actors(stat_date, actor_type, actor_key);');
     database.exec('CREATE INDEX IF NOT EXISTS idx_stats_daily_actors_user ON stats_daily_actors(user_id, actor_type);');
     database.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_stats_endpoint_rollup_uniq ON stats_endpoint_rollup(endpoint, method);');

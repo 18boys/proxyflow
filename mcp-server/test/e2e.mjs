@@ -13,6 +13,8 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fileURLToPath } from 'node:url';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 const BASE = (process.env.PROXYFLOW_URL || 'http://localhost:19000').replace(/\/+$/, '');
@@ -64,8 +66,8 @@ const API = 'https://api.example.com';
 // ── 1. tool surface ───────────────────────────────────────────────────────
 section('1. Tool surface');
 const names = (await client.listTools()).tools.map((t) => t.name).sort();
-check('exposes 11 tools', names.length === 11, names);
-check('has the new tools', ['delete_mock', 'get_request', 'get_shared_request', 'list_recent_requests', 'list_shared_requests', 'share_request', 'switch_mock_version'].every((n) => names.includes(n)));
+check('exposes 14 tools', names.length === 14, names);
+check('has the new tools', ['authorize', 'delete_mock', 'get_or_create_session', 'get_request', 'get_shared_request', 'list_recent_requests', 'list_sessions', 'list_shared_requests', 'share_request', 'switch_mock_version'].every((n) => names.includes(n)));
 
 // ── 2. upsert basics ──────────────────────────────────────────────────────
 section('2. upsert_mock');
@@ -296,6 +298,109 @@ const badTok = await connect({ PROXYFLOW_URL: BASE, PROXYFLOW_TOKEN: 'pf_definit
 r = await (async () => { const x = await badTok.callTool({ name: 'list_mocks', arguments: {} }); return { err: !!x.isError, raw: x.content[0].text }; })();
 check('bad token → 401 with a fix-it hint', r.err && /HTTP 401/.test(r.raw) && /Settings/.test(r.raw), r.raw);
 await badTok.close();
+
+// ── 11. Zero-token lazy browser authorization + auto session_id ──────────
+section('11. Zero-token auto-authorization & session_id tools');
+const credDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pf-mcp-creds-'));
+const credFile = path.join(credDir, 'credentials.json');
+const freshEmail = `autoauth-${Date.now()}@example.com`;
+const { token: freshJwt } = await post('/api/auth/register', { email: freshEmail, password: 'e2e-pass-1234' });
+
+const autoEnv = {
+  PROXYFLOW_URL: BASE,
+  PROXYFLOW_TOKEN: '',
+  PROXYFLOW_CREDENTIALS_PATH: credFile,
+  PROXYFLOW_NO_BROWSER: '1',
+  PROXYFLOW_AUTH_WAIT_MS: '0',
+};
+const autoClient = await connect(autoEnv);
+const callAuto = async (c, name, args = {}) => {
+  const res = await c.callTool({ name, arguments: args });
+  const raw = res.content?.[0]?.text ?? '';
+  let data; try { data = JSON.parse(raw); } catch { data = raw; }
+  return { err: !!res.isError, data, raw };
+};
+
+// 11a. Lazy auth triggers on first tool call when PROXYFLOW_TOKEN is omitted
+r = await callAuto(autoClient, 'list_mocks', {});
+check('starts lazy browser auth without crashing when PROXYFLOW_TOKEN is omitted',
+  r.err && r.data?.auth_required === true && r.data?.status === 'pending' && Boolean(r.data?.request_id) && /^PF-/.test(r.data?.user_code) && r.data?.auth_url?.includes('/mcp-auth?request_id='),
+  r.raw);
+const reqId = r.data.request_id;
+
+// Verify browser consent info endpoint works with JWT
+const consentInfo = await (await fetch(`${BASE}/api/auth/mcp/request/${reqId}`, {
+  headers: { authorization: `Bearer ${freshJwt}` },
+})).json();
+check('consent endpoint exposes user_code and has_device_session=false',
+  consentInfo.status === 'pending' && consentInfo.user_code === r.data.user_code && consentInfo.has_device_session === false,
+  consentInfo);
+
+// Security check: polling with wrong secret is rejected with 403
+const badPoll = await fetch(`${BASE}/api/auth/mcp/poll`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ request_id: reqId, poll_secret: 'wrong-secret' }),
+});
+check('polling with wrong secret is rejected with 403', badPoll.status === 403, badPoll.status);
+
+// Simulate user approving in browser (with ensure_session=false so we can test get_or_create_session from 0 devices)
+const approveRes = await post('/api/auth/mcp/approve', { request_id: reqId, token_name: 'E2E Auto Token', ensure_session: false }, { authorization: `Bearer ${freshJwt}` });
+check('browser approval succeeds and generates token', approveRes.success === true && approveRes.status === 'approved' && approveRes.token_prefix?.startsWith('pf_'), approveRes);
+
+// Next tool call automatically claims the approved token, persists it, and succeeds!
+r = await callAuto(autoClient, 'list_mocks', {});
+check('next tool call auto-claims approved token and succeeds', !r.err && r.data?.count === 0, r.raw);
+check('credentials file persisted with 0600 permissions', fs.existsSync(credFile) && (fs.statSync(credFile).mode & 0o777) === 0o600);
+
+// 11b. A brand-new MCP process picks up saved credentials with zero interaction
+const autoClient2 = await connect(autoEnv);
+r = await callAuto(autoClient2, 'authorize', { mode: 'status' });
+check('new MCP process reuses persisted credentials automatically', !r.err && r.data?.authorized === true && r.data?.source === 'credentials' && r.data?.user?.email === freshEmail, r.raw);
+
+// 11c. get_or_create_session & list_sessions
+r = await callAuto(autoClient2, 'list_sessions', {});
+check('fresh user starts with 0 sessions', !r.err && r.data?.count === 0, r.raw);
+
+r = await callAuto(autoClient2, 'get_or_create_session', {});
+check('get_or_create_session auto-creates first session with server_url & env_snippet',
+  !r.err && r.data?.created === true && Boolean(r.data?.session_id) && r.data?.relay_url === `${BASE}/api/relay` && r.data?.env_snippet?.includes(`PROXYFLOW_SESSION_ID=${r.data.session_id}`),
+  r.raw);
+const autoSid = r.data.session_id;
+
+r = await callAuto(autoClient2, 'get_or_create_session', {});
+check('subsequent get_or_create_session reuses existing session (idempotent)', !r.err && r.data?.created === false && r.data?.session_id === autoSid, r.raw);
+
+r = await callAuto(autoClient2, 'get_or_create_session', { name: 'web-backdoor' });
+check('named get_or_create_session creates named session', !r.err && r.data?.created === true && r.data?.name === 'web-backdoor' && r.data?.session_id !== autoSid, r.raw);
+const namedSid = r.data.session_id;
+
+r = await callAuto(autoClient2, 'get_or_create_session', { name: 'web-backdoor' });
+check('named get_or_create_session reuses same named session', !r.err && r.data?.created === false && r.data?.session_id === namedSid, r.raw);
+
+r = await callAuto(autoClient2, 'list_sessions', {});
+check('list_sessions returns both created sessions', !r.err && r.data?.count === 2, r.raw);
+
+// End-to-end relay check using the MCP-generated session_id!
+await callAuto(autoClient2, 'upsert_mock', { url_pattern: '/api/auto-sid-check', response_body: { wired: true } });
+const relayWired = await (await fetch(`${BASE}/api/relay`, {
+  method: 'POST',
+  headers: { 'content-type': 'application/json' },
+  body: JSON.stringify({ method: 'GET', url: `${API}/api/auto-sid-check`, headers: {}, body: null, sessionId: namedSid }),
+})).json();
+check('traffic sent with auto-generated session_id hits the user mock', relayWired?.wired === true, relayWired);
+
+// 11d. Revoking saved token automatically triggers re-auth on next call
+const freshTokens = await (await fetch(`${BASE}/api/tokens`, { headers: { authorization: `Bearer ${freshJwt}` } })).json();
+await fetch(`${BASE}/api/tokens/${freshTokens[0].id}`, { method: 'DELETE', headers: { authorization: `Bearer ${freshJwt}` } });
+r = await callAuto(autoClient2, 'list_mocks', {});
+check('revoked local credential automatically triggers fresh browser re-auth',
+  r.err && r.data?.auth_required === true && r.data?.status === 'pending' && r.data?.request_id !== reqId,
+  r.raw);
+
+await autoClient.close();
+await autoClient2.close();
+fs.rmSync(credDir, { recursive: true, force: true });
 
 await client.close();
 console.log(`\n${fail === 0 ? '🎉' : '💥'} ${pass} passed, ${fail} failed`);

@@ -17,6 +17,9 @@
 | `share_request` | 将某条抓包请求归档为**永久分享链接**（存入独立归档表，不受抓包日志 7 天/1000 条自动清理影响）。支持填 `title`、`note` 记录联调需求上下文，默认对敏感认证头（Authorization/Cookie 等）自动脱敏。 |
 | `list_shared_requests` | 查看/搜索自己已归档的永久分享链接列表。 |
 | `get_shared_request` | 按 `share_token` 或完整 `/share/<token>` 链接读取永久归档的请求与响应详情。 |
+| `authorize` | 查看当前登录状态，或发起浏览器一键授权并自动生成保存本地 Token（支持 `ensure` / `status` / `reauth` / `logout`）。 |
+| `get_or_create_session` | 自动获取已有或新建一个设备 `session_id`（附带 `server_url`、`relay_url`、`ws_url` 和 `.env.local` 片段），方便 Agent 直接写入项目 SDK / 代理配置 / 调试后门。 |
+| `list_sessions` | 列出当前账号下全部已配对设备及其 `session_id` 与在线状态。 |
 
 > 只有经过 proxyflow（已配对设备的 SDK relay，或带 `x-proxyflow-session` 头的代理请求）的流量才会被 mock / 抓取。
 > mock 只按 **pathname** 匹配（忽略域名和 query）；需要按 query/header/body 区分时用 `condition`。
@@ -30,13 +33,16 @@
 4. `switch_mock_version` 在成功/空/错误场景间切换，验证客户端各分支；
 5. 完成后 `delete_mock` 清理。
 
-## 获取 Token
+## 授权方式（推荐免填 Token）
 
-登录 proxyflow 控制台 → 设置页 → "API Tokens (MCP)" 卡片 → 生成新 Token（`pf_` 开头，仅显示一次，请立即保存）。
+现在安装 MCP **无需手动配置 `PROXYFLOW_TOKEN`**，只需填 `PROXYFLOW_URL`：
+- 首次调用任意 MCP 工具（或调用 `authorize`）时，MCP 会自动打开浏览器跳转到 ProxyFlow 授权页（`/mcp-auth`）；
+- 登录并点击「确认授权」后，后端自动生成 API Token，MCP 自动领取并持久化到 `~/.proxyflow/credentials.json`（权限 `0600`），后续永久免登；
+- 如果你仍想在无浏览器/CI 环境使用固定 Token，也可以在控制台 Settings → API Tokens 手动生成并配置 `PROXYFLOW_TOKEN` 环境变量。
 
 ## 接入方式一：npx（推荐）
 
-已发布到 npm，无需手动 clone/构建，直接在 MCP 客户端配置里用 `npx` 拉起：
+已发布到 npm，无需手动 clone/构建，直接在 MCP 客户端配置里用 `npx` 拉起（**无需填 Token**）：
 
 ```json
 {
@@ -45,8 +51,7 @@
       "command": "npx",
       "args": ["-y", "@proxyflow/mcp-server"],
       "env": {
-        "PROXYFLOW_URL": "http://localhost:9000",
-        "PROXYFLOW_TOKEN": "pf_xxxxxxxxxxxxxxxxxxxxxxxx"
+        "PROXYFLOW_URL": "http://localhost:3100"
       }
     }
   }
@@ -57,8 +62,7 @@
 
 ```bash
 claude mcp add proxyflow \
-  --env PROXYFLOW_URL=http://localhost:9000 \
-  --env PROXYFLOW_TOKEN=pf_xxxxxxxxxxxxxxxxxxxxxxxx \
+  --env PROXYFLOW_URL=http://localhost:3100 \
   -- npx -y @proxyflow/mcp-server
 ```
 
@@ -104,9 +108,11 @@ claude mcp add proxyflow \
 
 | 变量 | 必填 | 说明 |
 |------|------|------|
-| `PROXYFLOW_URL` | 是 | proxyflow 后端地址，例如 `http://localhost:9000` |
-| `PROXYFLOW_TOKEN` | 是 | 在设置页生成的 API Token，`pf_` 开头 |
-| `PROXYFLOW_WEB_URL` | 否 | 前端控制台访问域名（如 `https://proxyflow.example.com`），用于 `share_request` 拼接完整的分享页面链接；未配置时回退使用后端的 `PUBLIC_BASE_URL` 或 `PROXYFLOW_URL` |
+| `PROXYFLOW_URL` | 是 | proxyflow 服务地址，例如 `https://proxyflow.example.com` 或 `http://localhost:3100` |
+| `PROXYFLOW_TOKEN` | 否 | 可选；在设置页手动生成的 API Token（`pf_` 开头）。省略时首次使用自动走浏览器一键授权并保存到 `~/.proxyflow/credentials.json` |
+| `PROXYFLOW_WEB_URL` | 否 | 前端控制台访问域名（当 `PROXYFLOW_URL` 指向纯后端端口如 `:9000` 时使用），用于拼接授权页与分享页完整链接 |
+| `PROXYFLOW_CREDENTIALS_PATH` | 否 | 自定义本地凭证文件路径，默认 `~/.proxyflow/credentials.json` |
+| `PROXYFLOW_AUTH_WAIT_MS` | 否 | 发起浏览器授权后单次等待审批的毫秒数，默认 `45000` |
 
 ## 测试
 
