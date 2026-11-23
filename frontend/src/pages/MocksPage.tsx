@@ -14,6 +14,7 @@ import { copyToClipboard } from '../utils/clipboard';
 import MockEditor from '../components/MockEditor';
 import CustomSelect from '../components/CustomSelect';
 import JsonViewer from '../components/JsonViewer';
+import { ForkMockModal, CloneFolderModal } from '../components/ForkMockModal';
 
 type ViewTab = 'mine' | 'team';
 
@@ -70,8 +71,12 @@ export default function MocksPage() {
     owner_id: number;
     owner_email: string;
   } | null>(null);
-  const [cloningFolder, setCloningFolder] = useState(false);
-  const [forkingRuleKey, setForkingRuleKey] = useState<string | null>(null);
+  const [forkModalTarget, setForkModalTarget] = useState<{
+    rule: MockRule;
+    versionId?: number;
+    activate: boolean;
+  } | null>(null);
+  const [showCloneFolderModal, setShowCloneFolderModal] = useState(false);
 
   // Sync tab/owner/folder if URL params change externally (e.g. clicking a shared link)
   useEffect(() => {
@@ -349,63 +354,30 @@ export default function MocksPage() {
   };
 
   // ── Team fork handlers ──
-  const handleForkTeamRule = async (rule: MockRule, options: { versionId?: number; activate: boolean }) => {
-    const key = `${rule.id}:${options.versionId ?? 'rule'}:${options.activate ? 'on' : 'off'}`;
-    setForkingRuleKey(key);
-    try {
-      await mocksApi.fork({
-        sourceRuleId: rule.id,
-        versionId: options.versionId,
-        preserveFolderName: true,
-        activate: options.activate,
-      });
-      toast.success(
-        options.activate
-          ? `已复制「${rule.name}」到我的 Mock 并启用`
-          : `已复制「${rule.name}」到我的 Mock`,
-      );
-      await Promise.all([loadData(), loadTeamData(true)]);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '复制 Mock 失败');
-    } finally {
-      setForkingRuleKey(null);
-    }
+  const openForkModal = (rule: MockRule, options: { versionId?: number; activate: boolean }) => {
+    setForkModalTarget({
+      rule,
+      versionId: options.versionId,
+      activate: options.activate,
+    });
   };
 
-  const handleCloneTeamFolder = async () => {
-    if (selectedTeamFolder === 'all') return;
-    const ownerObj = teamOwners.find((o) => o.user_id === selectedTeamOwnerId);
-    const folderLabel = selectedTeamFolder === 'unfiled'
-      ? `${ownerObj?.email.split('@')[0] || '团队'} - 未分类`
-      : (selectedTeamFolderMeta?.name
-        || teamOwners.flatMap((o) => o.folders).find((f) => f.id === selectedTeamFolder)?.name
-        || '共享目录');
+  const handleForkedTeamRule = async (forkedRule: MockRule, activated: boolean) => {
+    const folderHint = forkedRule.folder_name ? `目录「${forkedRule.folder_name}」` : '未分类';
+    toast.success(
+      activated
+        ? `已复制「${forkedRule.name}」到${folderHint}并启用`
+        : `已复制「${forkedRule.name}」到${folderHint}`,
+    );
+    await Promise.all([loadData(), loadTeamData(true)]);
+  };
 
-    const ok = await confirm({
-      title: '克隆共享目录到我的 Mocks',
-      message: `将目录「${folderLabel}」下的 ${teamRules.length} 条公开 Mock 规则及其所有版本复制到你的账号下（默认保持关闭状态，避免直接影响当前调试流量）。`,
-      confirmText: '立即克隆',
-      type: 'info',
-    });
-    if (!ok) return;
-
-    setCloningFolder(true);
-    try {
-      const res = await mocksApi.forkFolder({
-        sourceFolderId: selectedTeamFolder,
-        sourceOwnerId: selectedTeamOwnerId ?? undefined,
-        targetFolderName: folderLabel,
-        activate: false,
-      });
-      toast.success(`已克隆 ${res.cloned_rules} 条规则到你的目录「${res.folder.name}」`);
-      await Promise.all([loadData(), loadTeamData(true)]);
-      setSelectedFolder(res.folder.id);
-      switchTab('mine');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '克隆目录失败');
-    } finally {
-      setCloningFolder(false);
-    }
+  const handleClonedTeamFolder = async (res: { folder: MockFolder | null; cloned_rules: number }) => {
+    const targetHint = res.folder ? `目录「${res.folder.name}」` : '未分类';
+    toast.success(`已克隆 ${res.cloned_rules} 条规则到你的${targetHint}`);
+    await Promise.all([loadData(), loadTeamData(true)]);
+    setSelectedFolder(res.folder ? res.folder.id : 'unfiled');
+    switchTab('mine');
   };
 
   const exportButtonLabel = exporting
@@ -555,12 +527,12 @@ export default function MocksPage() {
                 )}
                 <button
                   type="button"
-                  onClick={handleCloneTeamFolder}
-                  disabled={cloningFolder || teamRules.length === 0}
+                  onClick={() => setShowCloneFolderModal(true)}
+                  disabled={teamRules.length === 0}
                   className="btn-primary text-sm py-1.5 flex items-center gap-1.5 disabled:opacity-50"
                 >
-                  {cloningFolder ? <Loader2 size={14} className="animate-spin" /> : <GitFork size={14} />}
-                  {cloningFolder ? '克隆中...' : `克隆整个目录 (${teamRules.length})`}
+                  <GitFork size={14} />
+                  克隆整个目录 ({teamRules.length})
                 </button>
               </>
             )}
@@ -940,8 +912,7 @@ export default function MocksPage() {
                     <TeamMockRuleCard
                       key={rule.id}
                       rule={rule}
-                      forkingKey={forkingRuleKey}
-                      onFork={(opts) => handleForkTeamRule(rule, opts)}
+                      onFork={(opts) => openForkModal(rule, opts)}
                     />
                   ))}
                 </div>
@@ -968,6 +939,42 @@ export default function MocksPage() {
           onGenerated={() => { setShowAiGenerate(false); void loadData(); void loadTeamData(true); }}
           folders={folders}
           defaultFolderId={defaultFolderId}
+        />
+      )}
+
+      {/* Fork Single Rule Modal (with target folder selection) */}
+      {forkModalTarget && (
+        <ForkMockModal
+          rule={forkModalTarget.rule}
+          initialVersionId={forkModalTarget.versionId}
+          initialActivate={forkModalTarget.activate}
+          folders={folders}
+          onFolderCreated={(created) => {
+            setFolders((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+          }}
+          onClose={() => setForkModalTarget(null)}
+          onForked={handleForkedTeamRule}
+        />
+      )}
+
+      {/* Clone Folder Modal (with target folder selection) */}
+      {showCloneFolderModal && selectedTeamFolder !== 'all' && (
+        <CloneFolderModal
+          sourceFolderId={selectedTeamFolder}
+          sourceOwnerId={selectedTeamOwnerId ?? undefined}
+          sourceOwnerEmail={activeTeamOwner?.email || selectedTeamFolderMeta?.owner_email}
+          sourceFolderLabel={
+            selectedTeamFolder === 'unfiled'
+              ? `${activeTeamOwner?.email.split('@')[0] || '团队'} - 未分类`
+              : (activeTeamFolderName || '共享目录')
+          }
+          ruleCount={teamRules.length}
+          folders={folders}
+          onFolderCreated={(created) => {
+            setFolders((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+          }}
+          onClose={() => setShowCloneFolderModal(false)}
+          onCloned={handleClonedTeamFolder}
         />
       )}
     </div>
@@ -1134,18 +1141,14 @@ function MockRuleCard({
 
 function TeamMockRuleCard({
   rule,
-  forkingKey,
   onFork,
 }: {
   rule: MockRule;
-  forkingKey: string | null;
   onFork: (options: { versionId?: number; activate: boolean }) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [previewVersionId, setPreviewVersionId] = useState<number | null>(null);
   const versions = (rule.versions || []) as MockVersion[];
-  const isForkingCopy = forkingKey === `${rule.id}:rule:off`;
-  const isForkingActivate = forkingKey === `${rule.id}:rule:on`;
 
   return (
     <div className="card overflow-hidden hover:border-slate-600 transition-colors">
@@ -1209,22 +1212,21 @@ function TeamMockRuleCard({
           <button
             type="button"
             onClick={() => onFork({ activate: false })}
-            disabled={forkingKey !== null}
-            className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5 disabled:opacity-50"
-            title="复制到我的 Mock（默认关闭，不立即生效）"
+            className="btn-secondary text-xs py-1.5 px-2.5 flex items-center gap-1.5"
+            title="选择目标目录并复制到我的 Mock"
           >
-            {isForkingCopy ? <Loader2 size={12} className="animate-spin" /> : <GitFork size={12} />}
-            {isForkingCopy ? '复制中...' : '复制到我的 Mocks'}
+            <GitFork size={12} />
+            复制到我的 Mocks
           </button>
           <button
             type="button"
             onClick={() => onFork({ activate: true })}
-            disabled={forkingKey !== null || versions.length === 0}
+            disabled={versions.length === 0}
             className="btn-primary text-xs py-1.5 px-2.5 flex items-center gap-1.5 disabled:opacity-50"
-            title="复制到我的 Mock 并立即启用"
+            title="选择目标目录并复制后立即启用"
           >
-            {isForkingActivate ? <Loader2 size={12} className="animate-spin" /> : <ToggleRight size={13} />}
-            {isForkingActivate ? '复制中...' : '复制并启用'}
+            <ToggleRight size={13} />
+            复制并启用
           </button>
         </div>
       </div>
@@ -1235,7 +1237,6 @@ function TeamMockRuleCard({
             <p className="text-xs text-slate-600 italic">暂无响应版本</p>
           ) : versions.map((v) => {
             const isPreviewOpen = previewVersionId === v.id;
-            const isForkingVer = forkingKey === `${rule.id}:${v.id}:on`;
             return (
               <div key={v.id} className="rounded-lg border border-slate-800 bg-slate-900/60 overflow-hidden">
                 <div className="flex items-center gap-2 px-3 py-2 text-xs">
@@ -1260,11 +1261,10 @@ function TeamMockRuleCard({
                   <button
                     type="button"
                     onClick={() => onFork({ versionId: v.id, activate: true })}
-                    disabled={forkingKey !== null}
-                    className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-500/15 hover:bg-cyan-600 text-cyan-400 hover:text-white border border-cyan-500/30 text-[11px] font-medium transition-colors disabled:opacity-50"
+                    className="flex items-center gap-1 px-2 py-1 rounded bg-cyan-500/15 hover:bg-cyan-600 text-cyan-400 hover:text-white border border-cyan-500/30 text-[11px] font-medium transition-colors"
                   >
-                    {isForkingVer ? <Loader2 size={11} className="animate-spin" /> : <GitFork size={11} />}
-                    {isForkingVer ? '复制中...' : '采用此版本'}
+                    <GitFork size={11} />
+                    采用此版本
                   </button>
                 </div>
                 {isPreviewOpen && (

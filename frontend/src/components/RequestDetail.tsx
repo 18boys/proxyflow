@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2,
   RotateCw, RefreshCw, Send, Plus, AlertCircle, WrapText, Search, Globe,
-  Lock, GitFork, Eye, EyeOff, Users, Loader2,
+  Lock, GitFork, Eye, EyeOff, Users,
 } from 'lucide-react';
 import type { MockFolder, RequestLog, MockRule, MockVersion } from '../types';
 import { getStatusColor, getStatusColorClass, getMethodColor, parseJson } from '../types';
@@ -12,6 +12,7 @@ import { useStore } from '../store/useStore';
 import { useDialog } from '../context/DialogContext';
 import MockEditor from './MockEditor';
 import CustomSelect from './CustomSelect';
+import { ForkMockModal } from './ForkMockModal';
 import { copyToClipboard } from '../utils/clipboard';
 
 interface RequestDetailProps {
@@ -465,7 +466,14 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
         )}
 
         {activeTab === 'mock' && (
-          <MockTab log={log} refreshTrigger={mockRefreshKey} />
+          <MockTab
+            log={log}
+            refreshTrigger={mockRefreshKey}
+            folders={mockFolders}
+            onFolderCreated={(created) => {
+              setMockFolders((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
+            }}
+          />
         )}
       </div>
 
@@ -481,7 +489,17 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
 }
 
 // ── MockTab ────────────────────────────────────────────────────────────────
-function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: number }) {
+function MockTab({
+  log,
+  refreshTrigger,
+  folders,
+  onFolderCreated,
+}: {
+  log: RequestLog;
+  refreshTrigger?: number;
+  folders: MockFolder[];
+  onFolderCreated?: (folder: MockFolder) => void;
+}) {
   const { confirm, toast } = useDialog();
   const [rules, setRules] = useState<MockRule[]>([]);
   const [versions, setVersions] = useState<Record<number, MockVersion[]>>({});
@@ -489,7 +507,10 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<'all' | 'mine' | 'others'>('all');
   const [operating, setOperating] = useState<number | null>(null); // versionId being operated
-  const [forkingKey, setForkingKey] = useState<string | null>(null);
+  const [forkModalTarget, setForkModalTarget] = useState<{
+    rule: MockRule;
+    version: MockVersion;
+  } | null>(null);
   const [togglingVisibilityId, setTogglingVisibilityId] = useState<number | null>(null);
   const [previewVersionId, setPreviewVersionId] = useState<number | null>(null);
   // local state per own rule: { activeVersionId, isActive }
@@ -568,27 +589,16 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
     }
   };
 
-  // Fork another user's mock rule into own account and immediately activate the chosen version
-  const handleForkAndApply = async (rule: MockRule, version: MockVersion) => {
-    const key = `${rule.id}:${version.id}`;
-    setForkingKey(key);
-    try {
-      await mocksApi.fork({
-        sourceRuleId: rule.id,
-        versionId: version.id,
-        activate: true,
-        disableConflicting: true,
-        targetUrl: log.url,
-        targetMethod: log.method,
-      });
-      toast.success(`已复制「${rule.name}」到我的 Mock 并启用（${version.name}）`);
-      if (scope === 'others') setScope('all');
-      await loadMockData(true);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '复制并启用 Mock 失败');
-    } finally {
-      setForkingKey(null);
-    }
+  // Handle successful fork from ForkMockModal
+  const handleForked = async (forkedRule: MockRule, activated: boolean) => {
+    const folderHint = forkedRule.folder_name ? `目录「${forkedRule.folder_name}」` : '未分类';
+    toast.success(
+      activated
+        ? `已复制「${forkedRule.name}」到${folderHint}并启用`
+        : `已复制「${forkedRule.name}」到${folderHint}`,
+    );
+    if (scope === 'others') setScope('all');
+    await loadMockData(true);
   };
 
   const handleToggleRuleVisibility = async (rule: MockRule) => {
@@ -954,7 +964,6 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
                       <p className="text-xs text-slate-600 px-2 py-1 italic">No versions configured</p>
                     ) : (versions[rule.id] || []).map((v) => {
                       const isPreviewOpen = previewVersionId === v.id;
-                      const isForking = forkingKey === `${rule.id}:${v.id}`;
                       return (
                         <div key={v.id} className="rounded border border-transparent hover:border-slate-700/80 hover:bg-slate-800/40 transition-colors">
                           <div className="flex items-center gap-2 px-2 py-1.5">
@@ -974,17 +983,12 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
                             </button>
                             <button
                               type="button"
-                              onClick={() => handleForkAndApply(rule, v)}
-                              disabled={forkingKey !== null}
-                              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white border border-cyan-500/30 transition-colors shrink-0 disabled:opacity-50"
-                              title="复制此规则及其版本到你的名下并立即启用"
+                              onClick={() => setForkModalTarget({ rule, version: v })}
+                              className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-medium bg-cyan-600/20 hover:bg-cyan-600 text-cyan-400 hover:text-white border border-cyan-500/30 transition-colors shrink-0"
+                              title="选择目标目录并复制到你的名下立即启用"
                             >
-                              {isForking ? (
-                                <Loader2 size={10} className="animate-spin" />
-                              ) : (
-                                <GitFork size={10} />
-                              )}
-                              {isForking ? '复制中...' : '复制并启用'}
+                              <GitFork size={10} />
+                              复制并启用
                             </button>
                           </div>
                           {isPreviewOpen && (
@@ -1018,6 +1022,22 @@ function MockTab({ log, refreshTrigger }: { log: RequestLog; refreshTrigger?: nu
             await loadMockData(true);
             setEditingMock(null);
           }}
+        />
+      )}
+
+      {/* Fork colleague's mock with target folder selection */}
+      {forkModalTarget && (
+        <ForkMockModal
+          rule={forkModalTarget.rule}
+          initialVersionId={forkModalTarget.version.id}
+          initialActivate={true}
+          disableConflicting={true}
+          targetUrl={log.url}
+          targetMethod={log.method}
+          folders={folders}
+          onFolderCreated={onFolderCreated}
+          onClose={() => setForkModalTarget(null)}
+          onForked={handleForked}
         />
       )}
     </div>

@@ -263,9 +263,10 @@ export const mocksApi = {
   forkFolder: (data: {
     sourceFolderId: number | 'unfiled';
     sourceOwnerId?: number;
+    targetFolderId?: number | null;
     targetFolderName?: string;
     activate?: boolean;
-  }) => post<{ folder: import('../types').MockFolder; cloned_rules: number }>('/mocks/fork-folder', data),
+  }) => post<{ folder: import('../types').MockFolder | null; cloned_rules: number }>('/mocks/fork-folder', data),
   listVersions: (id: number) =>
     get<import('../types').MockVersion[]>(`/mocks/${id}/versions`),
   createVersion: (id: number, data: {

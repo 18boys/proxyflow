@@ -697,17 +697,33 @@ router.post('/fork-folder', requireAuth, (req: AuthRequest, res: Response): void
   const {
     sourceFolderId,
     sourceOwnerId,
+    targetFolderId: rawTargetFolderId,
     targetFolderName,
     activate = false,
   } = req.body as {
     sourceFolderId?: number | 'unfiled';
     sourceOwnerId?: number;
+    targetFolderId?: number | null;
     targetFolderName?: string;
     activate?: boolean;
   };
 
   const db = getDb();
   const userId = req.userId!;
+
+  let explicitTargetFolderId: number | null | undefined = undefined;
+  if (rawTargetFolderId !== undefined) {
+    const parsedTarget = parseFolderId(rawTargetFolderId);
+    if (rawTargetFolderId !== null && String(rawTargetFolderId) !== '' && parsedTarget === null) {
+      res.status(400).json({ error: 'targetFolderId must be a positive integer or null' });
+      return;
+    }
+    if (!folderBelongsToUser(parsedTarget, userId)) {
+      res.status(400).json({ error: 'Target folder not found' });
+      return;
+    }
+    explicitTargetFolderId = parsedTarget;
+  }
 
   let sourceRules: Record<string, unknown>[] = [];
   let defaultFolderName = '';
@@ -773,7 +789,9 @@ router.post('/fork-folder', requireAuth, (req: AuthRequest, res: Response): void
   const enrichedSources = enrichRulesWithVersions(sourceRules, { includeFullVersions: true });
 
   const result = db.transaction(() => {
-    const targetFolderId = findOrCreateUserFolder(userId, finalFolderName);
+    const targetFolderId = explicitTargetFolderId !== undefined
+      ? explicitTargetFolderId
+      : findOrCreateUserFolder(userId, finalFolderName);
     const insertRule = db.prepare(`
       INSERT INTO mock_rules
         (user_id, folder_id, name, url_pattern, match_type, method, is_active, is_public,
@@ -834,16 +852,18 @@ router.post('/fork-folder', requireAuth, (req: AuthRequest, res: Response): void
       clonedRules++;
     }
 
-    const folder = db.prepare(`
-      SELECT
-        mf.*,
-        COUNT(mr.id) AS mock_count,
-        COALESCE(SUM(CASE WHEN mr.is_public = 1 THEN 1 ELSE 0 END), 0) AS public_mock_count
-      FROM mock_folders mf
-      LEFT JOIN mock_rules mr ON mr.folder_id = mf.id
-      WHERE mf.id = ?
-      GROUP BY mf.id
-    `).get(targetFolderId);
+    const folder = targetFolderId !== null
+      ? db.prepare(`
+          SELECT
+            mf.*,
+            COUNT(mr.id) AS mock_count,
+            COALESCE(SUM(CASE WHEN mr.is_public = 1 THEN 1 ELSE 0 END), 0) AS public_mock_count
+          FROM mock_folders mf
+          LEFT JOIN mock_rules mr ON mr.folder_id = mf.id
+          WHERE mf.id = ?
+          GROUP BY mf.id
+        `).get(targetFolderId)
+      : null;
 
     return { folder, cloned_rules: clonedRules };
   })();
