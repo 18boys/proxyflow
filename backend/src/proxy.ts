@@ -263,6 +263,16 @@ export async function saveRequestLog(data: {
   return lastInsertRowid;
 }
 
+export function getRequestLogWithDevice(logId: number): Record<string, unknown> | undefined {
+  const db = getDb();
+  return db.prepare(`
+    SELECT rl.*, ds.name AS device_name
+    FROM request_logs rl
+    LEFT JOIN device_sessions ds ON ds.session_id = rl.session_id AND ds.user_id = rl.user_id
+    WHERE rl.id = ?
+  `).get(logId) as Record<string, unknown> | undefined;
+}
+
 export function createProxyServer(): http.Server {
   const proxyServer = http.createServer(async (clientReq, clientRes) => {
     const startTime = Date.now();
@@ -301,16 +311,18 @@ export function createProxyServer(): http.Server {
     // Try to identify the user by session or auth token
     let userId: number | null = null;
     let sessionId: string | null = null;
+    let deviceName: string | null = null;
 
     const sessionHeader = requestHeaders['x-proxyflow-session'];
     if (sessionHeader) {
       const db = getDb();
       const session = db.prepare(
-        'SELECT user_id FROM device_sessions WHERE session_id = ?'
-      ).get(sessionHeader) as { user_id: number } | undefined;
+        'SELECT user_id, name FROM device_sessions WHERE session_id = ?'
+      ).get(sessionHeader) as { user_id: number; name: string } | undefined;
       if (session) {
         userId = session.user_id;
         sessionId = sessionHeader;
+        deviceName = session.name || null;
       }
     }
 
@@ -383,13 +395,11 @@ export function createProxyServer(): http.Server {
         mockId: mockMatch.rule.id,
       });
 
-      {
+      if (userId) {
         const db2 = getDb();
-        const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
-        if (userId) {
-          await wsManager.broadcastToUser(userId, { type: 'new_request', log });
-        } else {
-          await wsManager.broadcastToAll({ type: 'new_request', log });
+        const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId) as Record<string, unknown> | undefined;
+        if (log) {
+          await wsManager.broadcastToUser(userId, { type: 'new_request', log: { ...log, device_name: deviceName } });
         }
       }
       return;
@@ -451,15 +461,11 @@ export function createProxyServer(): http.Server {
           ttfbMs,
         });
 
-        {
+        if (userId) {
           const db2 = getDb();
-          const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
-          if (userId) {
-            // Broadcast to the specific authenticated user
-            await wsManager.broadcastToUser(userId, { type: 'new_request', log });
-          } else {
-            // Anonymous request: broadcast to ALL authenticated dashboard users
-            await wsManager.broadcastToAll({ type: 'new_request', log });
+          const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId) as Record<string, unknown> | undefined;
+          if (log) {
+            await wsManager.broadcastToUser(userId, { type: 'new_request', log: { ...log, device_name: deviceName } });
           }
         }
       });
@@ -509,15 +515,17 @@ export function createProxyServer(): http.Server {
     // Identify user from request headers
     let userId: number | null = null;
     let sessionId: string | null = null;
+    let deviceName: string | null = null;
     const sessionHeader = (req.headers['x-proxyflow-session'] as string) || '';
     if (sessionHeader) {
       const db = getDb();
       const session = db.prepare(
-        'SELECT user_id FROM device_sessions WHERE session_id = ?'
-      ).get(sessionHeader) as { user_id: number } | undefined;
+        'SELECT user_id, name FROM device_sessions WHERE session_id = ?'
+      ).get(sessionHeader) as { user_id: number; name: string } | undefined;
       if (session) {
         userId = session.user_id;
         sessionId = sessionHeader;
+        deviceName = session.name || null;
       }
     }
 
@@ -550,12 +558,12 @@ export function createProxyServer(): http.Server {
           isMocked: false,
           mockId: null,
         });
-        const db2 = getDb();
-        const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
         if (userId) {
-          await wsManager.broadcastToUser(userId, { type: 'new_request', log });
-        } else {
-          await wsManager.broadcastToAll({ type: 'new_request', log });
+          const db2 = getDb();
+          const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId) as Record<string, unknown> | undefined;
+          if (log) {
+            await wsManager.broadcastToUser(userId, { type: 'new_request', log: { ...log, device_name: deviceName } });
+          }
         }
       } catch {
         // Non-critical: logging failure should not crash the proxy

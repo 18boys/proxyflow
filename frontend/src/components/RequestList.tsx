@@ -1,8 +1,8 @@
 import { useStore } from '../store/useStore';
-import { getStatusColor, getStatusColorClass, getMethodColor } from '../types';
-import type { RequestLog } from '../types';
-import { Trash2, Filter, X, CheckSquare, Square, Search, RefreshCw, Zap } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { getStatusColor, getStatusColorClass, getMethodColor, resolveRequestDeviceInfo } from '../types';
+import type { DeviceSession, RequestLog } from '../types';
+import { Trash2, Filter, X, CheckSquare, Square, Search, RefreshCw, Smartphone, Terminal } from 'lucide-react';
+import { useState, useEffect, useMemo } from 'react';
 import { requestsApi } from '../api/client';
 import CustomSelect from './CustomSelect';
 
@@ -81,9 +81,51 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
         if (!isNaN(Number(filters.status)) && status !== Number(filters.status)) return false;
       }
     }
-    if (filters.sessionId && req.session_id !== filters.sessionId) return false;
+    if (filters.sessionId) {
+      if (filters.sessionId === '__none__') {
+        if (req.session_id) return false;
+      } else if (req.session_id !== filters.sessionId) {
+        return false;
+      }
+    }
     return true;
   });
+
+  const deviceFilterOptions = useMemo(() => {
+    const knownIds = new Set(devices.map((d) => d.session_id));
+    const orphanIds: string[] = [];
+    let hasConsoleRequests = false;
+
+    for (const r of requests) {
+      if (!r.session_id) {
+        hasConsoleRequests = true;
+      } else if (!knownIds.has(r.session_id) && !orphanIds.includes(r.session_id)) {
+        orphanIds.push(r.session_id);
+      }
+    }
+
+    return [
+      { value: '', label: 'All Devices & Browsers' },
+      ...devices.map((d) => ({
+        value: d.session_id,
+        label: d.name || d.session_id.slice(0, 8),
+        badge: d.is_online ? 'Online' : undefined,
+        badgeColor: d.is_online ? 'bg-emerald-500/15 text-emerald-400' : undefined,
+      })),
+      ...orphanIds.map((sid) => ({
+        value: sid,
+        label: sid.startsWith('sess_') ? sid.slice(5) : sid.slice(0, 8),
+        badge: '历史会话',
+        badgeColor: 'bg-slate-700 text-slate-400',
+      })),
+      ...(hasConsoleRequests
+        ? [{
+            value: '__none__',
+            label: '控制台发送 / 无设备',
+          }]
+        : []),
+    ];
+  }, [devices, requests]);
 
   const hasActiveFilters = Object.values(filters).some(Boolean);
 
@@ -212,15 +254,7 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
               className="flex-1"
               value={filters.sessionId}
               onChange={(val) => setFilter('sessionId', val)}
-              options={[
-                { value: '', label: 'All Devices & Browsers' },
-                ...devices.map((d) => ({
-                  value: d.session_id,
-                  label: d.name || d.session_id.slice(0, 8),
-                  badge: d.is_online ? 'Online' : undefined,
-                  badgeColor: d.is_online ? 'bg-emerald-500/15 text-emerald-400' : undefined,
-                })),
-              ]}
+              options={deviceFilterOptions}
             />
           </div>
         )}
@@ -260,6 +294,7 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
             <RequestItem
               key={req.id}
               req={req}
+              devices={devices}
               isSelected={selectedRequestId === req.id}
               isSelectedForDiagnosis={selectedForDiagnosis.includes(req.id)}
               isDisabling={disablingId === req.id}
@@ -276,6 +311,7 @@ export default function RequestList({ onSelectRequest }: RequestListProps) {
 
 interface RequestItemProps {
   req: RequestLog;
+  devices: DeviceSession[];
   isSelected: boolean;
   isSelectedForDiagnosis: boolean;
   isDisabling?: boolean;
@@ -286,6 +322,7 @@ interface RequestItemProps {
 
 function RequestItem({
   req,
+  devices,
   isSelected,
   isSelectedForDiagnosis,
   isDisabling,
@@ -294,7 +331,9 @@ function RequestItem({
   onDisableMock,
 }: RequestItemProps) {
   const statusColor = getStatusColor(req.response_status);
+  void statusColor;
   const methodColor = getMethodColor(req.method);
+  const deviceInfo = resolveRequestDeviceInfo(req, devices);
 
   // Extract path from URL
   let displayPath = req.url;
@@ -398,7 +437,23 @@ function RequestItem({
       </div>
 
       {/* Trailing details */}
-      <div className={`flex items-center gap-4 shrink-0 text-[11px] ${isRed ? 'text-red-400' : ''}`}>
+      <div className={`flex items-center gap-3 shrink-0 text-[11px] ${isRed ? 'text-red-400' : ''}`}>
+        <span
+          title={deviceInfo.title}
+          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border max-w-[116px] font-normal ${
+            deviceInfo.isConsole
+              ? 'bg-slate-800/70 border-slate-700/80 text-slate-400'
+              : 'bg-slate-800/90 border-slate-700/80 text-slate-300'
+          }`}
+        >
+          {deviceInfo.isConsole ? (
+            <Terminal size={10} className="shrink-0 text-slate-500" />
+          ) : (
+            <Smartphone size={10} className={`shrink-0 ${deviceInfo.isOnline ? 'text-emerald-400' : 'text-cyan-400/80'}`} />
+          )}
+          <span className="truncate text-[10px]">{deviceInfo.label}</span>
+        </span>
+
         {req.response_status ? (
           <span
             className={`w-8 text-center font-mono ${getStatusColorClass(req.response_status, isRed)}`}

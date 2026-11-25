@@ -92,7 +92,7 @@ router.post('/diagnose', requireAuth, async (req: AuthRequest, res: Response): P
 
   const db = getDb();
   const logs = requestIds.map((id: number) => db.prepare(
-    'SELECT * FROM request_logs WHERE id = ? AND (user_id = ? OR user_id IS NULL)'
+    'SELECT * FROM request_logs WHERE id = ? AND user_id = ?'
   ).get(id, req.userId!)).filter(Boolean) as Record<string, unknown>[];
 
   if (logs.length === 0) {

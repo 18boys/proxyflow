@@ -2,10 +2,10 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   Copy, Check, Bookmark, Clock, Pencil, X, ChevronRight, Share2, Trash2,
   RotateCw, RefreshCw, Send, Plus, AlertCircle, WrapText, Search, Globe,
-  Lock, GitFork, Eye, EyeOff, Users,
+  Lock, GitFork, Eye, EyeOff, Users, Smartphone, Terminal,
 } from 'lucide-react';
 import type { MockFolder, RequestLog, MockRule, MockVersion } from '../types';
-import { getStatusColor, getStatusColorClass, getMethodColor, parseJson } from '../types';
+import { getStatusColor, getStatusColorClass, getMethodColor, parseJson, resolveRequestDeviceInfo } from '../types';
 import JsonViewer, { HeadersTable } from './JsonViewer';
 import { requestsApi, mocksApi } from '../api/client';
 import { useStore } from '../store/useStore';
@@ -39,6 +39,7 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
   const [disableMockMsg, setDisableMockMsg] = useState<string | null>(null);
   const requests = useStore((s) => s.requests);
   const setRequests = useStore((s) => s.setRequests);
+  const devices = useStore((s) => s.devices);
 
   useEffect(() => {
     if (!requestId) {
@@ -264,6 +265,22 @@ export default function RequestDetail({ requestId, onClose }: RequestDetailProps
             {log.duration_ms !== null && (
               <span className="text-xs text-slate-400 font-mono">{log.duration_ms}ms</span>
             )}
+            {(() => {
+              const dev = resolveRequestDeviceInfo(log, devices);
+              return (
+                <span
+                  title={dev.title}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] bg-slate-800 border border-slate-700/80 text-slate-300 max-w-44"
+                >
+                  {dev.isConsole ? (
+                    <Terminal size={11} className="shrink-0 text-slate-500" />
+                  ) : (
+                    <Smartphone size={11} className={`shrink-0 ${dev.isOnline ? 'text-emerald-400' : 'text-cyan-400'}`} />
+                  )}
+                  <span className="truncate">{dev.label}</span>
+                </span>
+              );
+            })()}
             {log.is_mocked === 1 && (
               <button
                 type="button"

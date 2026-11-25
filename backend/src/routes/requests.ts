@@ -101,49 +101,60 @@ router.get('/', requireAuth, (req: AuthRequest, res: Response): void => {
     limit = '1000',
   } = req.query as Record<string, string>;
 
-  // Show logs belonging to this user
-  let query = 'SELECT * FROM request_logs WHERE user_id = ?';
+  // Show logs belonging to this user, enriched with paired device name
+  let whereClause = 'WHERE rl.user_id = ?';
   const params: unknown[] = [req.userId!];
 
   if (url) {
-    query += ' AND url LIKE ?';
+    whereClause += ' AND rl.url LIKE ?';
     params.push(`%${url}%`);
   }
   if (method) {
-    query += ' AND method = ?';
+    whereClause += ' AND rl.method = ?';
     params.push(method.toUpperCase());
   }
   if (status) {
     if (status.endsWith('xx')) {
       const prefix = status[0];
-      query += ' AND response_status >= ? AND response_status < ?';
+      whereClause += ' AND rl.response_status >= ? AND rl.response_status < ?';
       params.push(Number(prefix) * 100, (Number(prefix) + 1) * 100);
     } else {
-      query += ' AND response_status = ?';
+      whereClause += ' AND rl.response_status = ?';
       params.push(Number(status));
     }
   }
   if (sessionId) {
-    query += ' AND session_id = ?';
-    params.push(sessionId);
+    if (sessionId === '__none__') {
+      whereClause += ' AND rl.session_id IS NULL';
+    } else {
+      whereClause += ' AND rl.session_id = ?';
+      params.push(sessionId);
+    }
   }
   if (startTime) {
-    query += ' AND created_at >= ?';
+    whereClause += ' AND rl.created_at >= ?';
     params.push(startTime);
   }
   if (endTime) {
-    query += ' AND created_at <= ?';
+    whereClause += ' AND rl.created_at <= ?';
     params.push(endTime);
   }
 
   const offset = (Number(page) - 1) * Number(limit);
-  query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
-  params.push(Number(limit), offset);
+  const logs = db.prepare(`
+    SELECT rl.*, ds.name AS device_name
+    FROM request_logs rl
+    LEFT JOIN device_sessions ds ON ds.session_id = rl.session_id AND ds.user_id = rl.user_id
+    ${whereClause}
+    ORDER BY rl.created_at DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, Number(limit), offset);
 
-  const logs = db.prepare(query).all(...params);
-  const total = (db.prepare(
-    query.replace('SELECT *', 'SELECT COUNT(*) as count').split('ORDER BY')[0]
-  ).get(...params.slice(0, -2)) as { count: number }).count;
+  const total = (db.prepare(`
+    SELECT COUNT(*) as count
+    FROM request_logs rl
+    ${whereClause}
+  `).get(...params) as { count: number }).count;
 
   res.json({ logs, total, page: Number(page), limit: Number(limit) });
 });
@@ -151,9 +162,12 @@ router.get('/', requireAuth, (req: AuthRequest, res: Response): void => {
 // GET /api/requests/:id
 router.get('/:id', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
-  const log = db.prepare(
-    'SELECT * FROM request_logs WHERE id = ? AND user_id = ?'
-  ).get(Number(req.params['id']), req.userId!);
+  const log = db.prepare(`
+    SELECT rl.*, ds.name AS device_name
+    FROM request_logs rl
+    LEFT JOIN device_sessions ds ON ds.session_id = rl.session_id AND ds.user_id = rl.user_id
+    WHERE rl.id = ? AND rl.user_id = ?
+  `).get(Number(req.params['id']), req.userId!);
 
   if (!log) {
     res.status(404).json({ error: 'Request not found' });
@@ -163,10 +177,10 @@ router.get('/:id', requireAuth, (req: AuthRequest, res: Response): void => {
   res.json(log);
 });
 
-// DELETE /api/requests - clear all requests
+// DELETE /api/requests - clear all requests belonging to this user
 router.delete('/', requireAuth, (req: AuthRequest, res: Response): void => {
   const db = getDb();
-  const result = db.prepare('DELETE FROM request_logs WHERE user_id = ? OR user_id IS NULL').run(req.userId!);
+  const result = db.prepare('DELETE FROM request_logs WHERE user_id = ?').run(req.userId!);
   res.json({ deleted: result.changes });
 });
 
@@ -267,7 +281,12 @@ router.post('/:id/replay', requireAuth, async (req: AuthRequest, res: Response):
       mockId: null,
     });
 
-    const newLog = db.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
+    const newLog = db.prepare(`
+      SELECT rl.*, ds.name AS device_name
+      FROM request_logs rl
+      LEFT JOIN device_sessions ds ON ds.session_id = rl.session_id AND ds.user_id = rl.user_id
+      WHERE rl.id = ?
+    `).get(logId);
     await wsManager.broadcastToUser(req.userId!, { type: 'new_request', log: newLog });
 
     res.json({
@@ -317,7 +336,12 @@ router.post('/send-custom', requireAuth, async (req: AuthRequest, res: Response)
     });
 
     const db = getDb();
-    const newLog = db.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
+    const newLog = db.prepare(`
+      SELECT rl.*, ds.name AS device_name
+      FROM request_logs rl
+      LEFT JOIN device_sessions ds ON ds.session_id = rl.session_id AND ds.user_id = rl.user_id
+      WHERE rl.id = ?
+    `).get(logId);
     await wsManager.broadcastToUser(req.userId!, { type: 'new_request', log: newLog });
 
     res.json({

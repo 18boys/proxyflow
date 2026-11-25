@@ -18,6 +18,7 @@ export interface DeviceSession {
 export interface RequestLog {
   id: number;
   session_id: string | null;
+  device_name?: string | null;
   user_id: number | null;
   method: string;
   url: string;
@@ -298,4 +299,53 @@ export function parseJson(str: string | null): unknown {
   } catch {
     return str;
   }
+}
+
+export function resolveRequestDeviceInfo(
+  req: Pick<RequestLog, 'session_id' | 'device_name'>,
+  devices: DeviceSession[] = [],
+): {
+  label: string;
+  title: string;
+  isConsole: boolean;
+  isOnline: boolean;
+} {
+  if (!req.session_id) {
+    return {
+      label: '控制台',
+      title: '控制台发送 / 未绑定设备 (session_id 为空)',
+      isConsole: true,
+      isOnline: false,
+    };
+  }
+
+  const matched = devices.find((d) => d.session_id === req.session_id);
+  if (matched) {
+    return {
+      label: matched.name || req.session_id.slice(0, 8),
+      title: `设备: ${matched.name} (${req.session_id})`,
+      isConsole: false,
+      isOnline: Boolean(matched.is_online),
+    };
+  }
+
+  if (req.device_name) {
+    return {
+      label: req.device_name,
+      title: `设备: ${req.device_name} (${req.session_id})`,
+      isConsole: false,
+      isOnline: false,
+    };
+  }
+
+  const fallback = req.session_id.startsWith('sess_')
+    ? req.session_id.slice(5)
+    : req.session_id.slice(0, 8);
+
+  return {
+    label: fallback,
+    title: `未在设备列表中的历史会话 (${req.session_id})`,
+    isConsole: false,
+    isOnline: false,
+  };
 }

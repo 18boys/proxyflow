@@ -147,15 +147,17 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
   // Identify user from sessionId
   let userId: number | null = null;
   let resolvedSessionId: string | null = null;
+  let resolvedDeviceName: string | null = null;
 
   if (sessionId) {
     const db = getDb();
     const session = db.prepare(
-      'SELECT user_id FROM device_sessions WHERE session_id = ?'
-    ).get(sessionId) as { user_id: number } | undefined;
+      'SELECT user_id, name FROM device_sessions WHERE session_id = ?'
+    ).get(sessionId) as { user_id: number; name: string } | undefined;
     if (session) {
       userId = session.user_id;
       resolvedSessionId = sessionId;
+      resolvedDeviceName = session.name || null;
       db.prepare('UPDATE device_sessions SET last_seen = datetime(\'now\', \'+8 hours\'), updated_at = datetime(\'now\', \'+8 hours\') WHERE session_id = ?').run(sessionId);
     }
   }
@@ -252,12 +254,12 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
       mockId: mockMatch.rule.id,
     });
 
-    const db2 = getDb();
-    const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
     if (userId) {
-      await wsManager.broadcastToUser(userId, { type: 'new_request', log });
-    } else {
-      await wsManager.broadcastToAll({ type: 'new_request', log });
+      const db2 = getDb();
+      const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId) as Record<string, unknown> | undefined;
+      if (log) {
+        await wsManager.broadcastToUser(userId, { type: 'new_request', log: { ...log, device_name: resolvedDeviceName } });
+      }
     }
 
     applyCorsHeaders(req, res, responseHeaders);
@@ -331,12 +333,12 @@ router.post('/', async (req: Request, res: Response): Promise<void> => {
           ttfbMs,
         });
 
-        const db2 = getDb();
-        const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
         if (userId) {
-          await wsManager.broadcastToUser(userId, { type: 'new_request', log });
-        } else {
-          await wsManager.broadcastToAll({ type: 'new_request', log });
+          const db2 = getDb();
+          const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId) as Record<string, unknown> | undefined;
+          if (log) {
+            await wsManager.broadcastToUser(userId, { type: 'new_request', log: { ...log, device_name: resolvedDeviceName } });
+          }
         }
 
         // 多个 Set-Cookie 不能合并成一行回写，否则浏览器只认第一个
@@ -450,15 +452,17 @@ router.post('/log', async (req: Request, res: Response): Promise<void> => {
 
   let userId: number | null = null;
   let resolvedSessionId: string | null = null;
+  let resolvedDeviceName: string | null = null;
 
   if (sessionId) {
     const db = getDb();
     const session = db.prepare(
-      'SELECT user_id FROM device_sessions WHERE session_id = ?'
-    ).get(sessionId) as { user_id: number } | undefined;
+      'SELECT user_id, name FROM device_sessions WHERE session_id = ?'
+    ).get(sessionId) as { user_id: number; name: string } | undefined;
     if (session) {
       userId = session.user_id;
       resolvedSessionId = sessionId;
+      resolvedDeviceName = session.name || null;
       db.prepare('UPDATE device_sessions SET last_seen = datetime(\'now\', \'+8 hours\'), updated_at = datetime(\'now\', \'+8 hours\') WHERE session_id = ?').run(sessionId);
     }
   }
@@ -483,12 +487,12 @@ router.post('/log', async (req: Request, res: Response): Promise<void> => {
     mockId: null,
   });
 
-  const db2 = getDb();
-  const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId);
   if (userId) {
-    await wsManager.broadcastToUser(userId, { type: 'new_request', log });
-  } else {
-    await wsManager.broadcastToAll({ type: 'new_request', log });
+    const db2 = getDb();
+    const log = db2.prepare('SELECT * FROM request_logs WHERE id = ?').get(logId) as Record<string, unknown> | undefined;
+    if (log) {
+      await wsManager.broadcastToUser(userId, { type: 'new_request', log: { ...log, device_name: resolvedDeviceName } });
+    }
   }
 
   res.json({ ok: true });
